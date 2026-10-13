@@ -68,7 +68,9 @@ export function createV2RoundAdapter({S, G, accepted, profile, networkGenesis, r
     const next = {...r, latestTxid: id, latestTransaction: serial(t), accepting: b.hash, containing: t.verboseData.blockHash, terminal: result.terminal,
       tip: result.next ? {transactionId: id, index: 0} : null, ledger: result.next ? hex(S.encodeLedger(result.next)) : r.ledger,
       spk: result.next ? tx.outputs[0].scriptPublicKey : r.spk, value: result.next ? tx.outputs[0].value.toString() : '0', utxoDaa: b.daa,
-      actualFee: result.fee?.toString() ?? null};
+      actualFee: result.fee?.toString() ?? null,
+      // Contract V2.0.1 persists no anchor: keep the matured SEALED input DAA as derived history (absent for V2).
+      ...(result.timeoutAnchorDaa != null ? {timeoutAnchorDaa: String(result.timeoutAnchorDaa)} : {})};
     if (next.tip) S.verifySnapshot(snap(next, b.daa), profile);
     return summary(next);
   }

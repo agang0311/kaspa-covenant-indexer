@@ -25,6 +25,7 @@ const {values: cli, positionals: [cmd = 'run', ...rest]} = parseArgs({allowPosit
   relay: {type: 'string'}, 'relay-file': {type: 'string'},
   contracts: {type: 'string', default: new URL('./contracts/default.json', import.meta.url).pathname}, contract: {type: 'string'},
   'legacy-contract': {type: 'string'}, 'registry-addresses': {type: 'string'},
+  'admin-token': {type: 'string'},
   'api-port': {type: 'string'}, 'api-host': {type: 'string', default: '127.0.0.1'}, 'cors-origin': {type: 'string', default: '*'},
   'checkpoint-ms': {type: 'string', default: '3000'}, 'reconcile-ms': {type: 'string', default: '60000'},
   'finality-blue-score': {type: 'string', default: '600'},
@@ -115,9 +116,35 @@ if (node.subscribeVirtualChainChanged) { try { await node.subscribeVirtualChainC
 log('STARTED', {node: node.identity, live: store.rounds({liveOnly: true}).length, contracts: contracts.describe()});
 let api = null;
 if (o['api-port']) {
-  api = createApi({store, corsOrigin: o['cors-origin'] ?? '*'});
+  let adminToken = o['admin-token'] ?? process.env.ADMIN_TOKEN ?? process.env.KASPA_INDEXER_ADMIN_TOKEN;
+  if (!adminToken) {
+    adminToken = store.getMeta('adminToken');
+    if (!adminToken) {
+      const crypto = await import('node:crypto');
+      adminToken = crypto.randomBytes(16).toString('hex');
+      store.setMeta('adminToken', adminToken);
+      log('ADMIN_TOKEN_INITIALIZED', {token: adminToken, note: 'Saved in database meta. Use this token to access /admin'});
+    }
+  } else {
+    store.setMeta('adminToken', adminToken);
+  }
+
+  api = createApi({
+    store,
+    corsOrigin: o['cors-origin'] ?? '*',
+    engine,
+    contracts,
+    node,
+    sdk,
+    network,
+    adminToken,
+    contractsPath: o.contracts,
+    openMember,
+    log
+  });
   await new Promise((resolve, reject) => { api.once('error', reject); api.listen(Number(o['api-port']), o['api-host'], resolve); });
   log('API_LISTENING', api.address());
+  log('ADMIN_DASHBOARD', {url: `http://${o['api-host']}:${o['api-port']}/admin`});
 }
 
 const every = (ms, fn) => { const t = setInterval(() => { if (!stopping && !degraded) fn(); }, ms); t.unref?.(); return t; };

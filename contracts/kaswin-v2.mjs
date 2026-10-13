@@ -5,7 +5,7 @@ import path from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {createV2RoundAdapter} from './v2-rounds.mjs';
 import {wireSpk} from '../src/normalize.mjs';
-import {registryScope, registrationOf, DEFAULT_REGISTRY_ADDRESS, REGISTRATION_SOMPI} from '../src/adapter/registry.mjs';
+import {registryScope, registrationOf, DEFAULT_REGISTRY_ADDRESS, REGISTRATION_SOMPI} from '../../tn10-index/vps/registry.mjs';
 const HASH = /^[0-9a-f]{64}$/;
 const TN10_GENESIS = 'f896a3034873be1739fc4359236899fd3d65d2bc94f9780df0d0da3eb1cc4370';
 const ACTIONS = {81: 'BUY', 82: 'CLOSE', 84: 'DRAW_AND_PAY', 89: 'TIMEOUT_REFUND', 90: 'REFUND'};
@@ -53,7 +53,10 @@ export async function create(options = {}, {sdk} = {}) {
   const {loadV2Bundle} = await load('contracts/f3.2/tools/linking.mjs');
   const {pins, profile} = await loadV2Bundle(path.join(o.repoDir, 'contracts/f3.2'));
   if (profile.id !== o.profileId || pins.networkGenesis !== o.networkGenesis) throw Error('V2_UNPINNED_PROFILE');
-  const [S, P, G, accepted] = await Promise.all(['state', 'protocol', 'genesis-discovery', 'accepted'].map(m => load(`packages/f3.2-core/lib/${m}.js`)));
+  // Publication repo layout: scripts/f3.2 (since 2026-10-10); older snapshots keep packages/f3.2-core. Same bytes either way.
+  const core = ['scripts/f3.2/lib', 'packages/f3.2-core/lib'].find(d => fs.existsSync(path.join(o.repoDir, d, 'state.js')));
+  if (!core) throw Error('V2_CORE_LIBRARY_MISSING');
+  const [S, P, G, accepted] = await Promise.all(['state', 'protocol', 'genesis-discovery', 'accepted'].map(m => load(`${core}/${m}.js`)));
   const scope = sdk && o.registryAddresses.length ? registryScope(sdk, o.registryAddresses) : [];
   const adapter = createV2RoundAdapter({S, G, accepted, profile, networkGenesis: o.networkGenesis, registryScope: scope, registrationOf});
   const watch = new Set(scope.map(r => r.address)), fee = BigInt(REGISTRATION_SOMPI);

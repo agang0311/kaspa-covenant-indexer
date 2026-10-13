@@ -1,16 +1,7 @@
 // Transaction / UTXO helpers shared by the event indexer. No SDK or network access here.
-export function canonical(x) {
-  if (typeof x === 'bigint') return x.toString();
-  if (Array.isArray(x)) return x.map(canonical);
-  if (x !== null && typeof x === 'object') {
-    const out = {};
-    for (const k of Object.keys(x).sort()) {
-      if (x[k] !== undefined) out[k] = canonical(x[k]);
-    }
-    return out;
-  }
-  return x;
-}
+import {canonical} from '../../../tools/tn10-index-core.mjs';
+
+export {canonical};
 export const ZERO_HASH = '0'.repeat(64);
 export const outpointKey = o => `${o.transactionId}:${o.index}`;
 export const txidOf = tx => tx?.verboseData?.transactionId ?? null;

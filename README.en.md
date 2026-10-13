@@ -1,15 +1,15 @@
-# Kaswin Event Indexer (`kaswin-indexer`)
+# Kaspa Covenant Indexer (`kaspa-covenant-indexer` / KCI)
 
 [English](./README.en.md) | [简体中文](./README.md)
 
-Standalone read-only event indexer and CID REST service for Kaswin stateful covenants on **Kaspa Testnet 10**.
+Standalone stateful covenant event indexer, CID REST service, and Admin Studio for **Kaspa Testnet 10**, **SilverScript**, and **Argent** covenants.
 
-This service tracks on-chain UTXO events, resolves spenders, validates selected-chain transaction acceptance, enforces pinned contract transition rules (defaulting to **V2**, with backward compatibility for existing **F3.2** and **F3** terminal rounds), and provides low-latency, CID-keyed REST endpoints for front-end DApps and Kaswin Web.
-
-- **Read-Only & Secure**: Holds no private keys, signs no transactions, and never broadcasts to the network.
-- **Dual-Node Hot-Standby Pool**: Built-in automatic discovery and failover using official Testnet 10 seeds and resolvers.
-- **No Continuous Chain Scanning**: Pure event-driven tracking via UTXO subscription notifications and targeted spender hydration, resulting in minimal network bandwidth and CPU usage.
-- **Zero External Monorepo Dependencies**: Self-contained distribution with embedded Kaspa WASM SDK (pinned v2.0.1) and precompiled contract rule packages.
+This service tracks on-chain UTXO events, resolves spenders, validates selected-chain transaction acceptance, enforces multi-version contract transition rules (defaulting to **V2** `7aaf76fe`, with backward compatibility for existing **F3.2** `7ca61d81` and **F3** `1dc41809` terminal rounds), and provides:
+- 🔍 **CID REST Service**: Low-latency, CID-keyed REST endpoints for front-end DApps and web applications.
+- 🖥️ **Web Admin Studio (`/admin`)**: Embedded dark-themed management dashboard featuring real-time node latency probing, node health diagnosis, memory/load metrics, and contract plugin hot-toggling.
+- 🛡️ **Read-Only & Secure**: Holds no private keys, signs no transactions, and never broadcasts. Admin endpoints are fully protected by Admin Token authentication.
+- ⚡ **No Continuous Chain Scanning**: Pure event-driven tracking via UTXO subscription notifications and targeted spender hydration, keeping memory usage minimal (<100MB RSS).
+- 📦 **Zero External Monorepo Dependencies**: Self-contained distribution with embedded Kaspa WASM SDK (pinned v2.0.1) and precompiled contract rule packages.
 
 ---
 
@@ -20,10 +20,10 @@ Fastest and most consistent deployment on any machine with Docker installed.
 ### 1. Launch with Docker Compose
 
 ```bash
-git clone https://github.com/agang0311/kaswin-indexer.git
-cd kaswin-indexer
+git clone https://github.com/agang0311/kaspa-covenant-indexer.git
+cd kaspa-covenant-indexer
 
-# (Optional) Customize node or registry addresses:
+# (Optional) Customize admin token, node, or registry addresses:
 cp .env.example .env
 
 # Start in background
@@ -33,19 +33,20 @@ docker compose up -d
 ### 2. Run with Plain Docker
 
 ```bash
-docker build -t kaswin-indexer .
+docker build -t kaspa-covenant-indexer .
 
-docker run -d --name kaswin-indexer \
+docker run -d --name kaspa-covenant-indexer \
   -p 8788:8788 \
-  -v kaswin-indexer-data:/data \
+  -e ADMIN_TOKEN="your-admin-token" \
+  -v kaspa-covenant-indexer-data:/data \
   --restart unless-stopped \
-  kaswin-indexer
+  kaspa-covenant-indexer
 ```
 
 After ~10–15 seconds (initial pool probing and subscription handshake), verify the service:
-```bash
-curl http://localhost:8788/v1/rounds
-```
+- REST API: `curl http://localhost:8788/v1/rounds`
+- Web Admin Dashboard: open `http://localhost:8788/admin` in your browser.
+
 
 ---
 

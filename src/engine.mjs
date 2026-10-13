@@ -27,7 +27,8 @@ export const DEFAULTS = Object.freeze({
   windowSliceMs: 20000,           // max time one resolveSpend holds the serial queue in the window walk
   windowWorkerHeapMb: 96,        // child process heap cap; measured adaptive-page heap peak ~54 MB in a spam burst
   windowWorkerPages: 200,        // pages per child process (one process = one memory high-water, then returned)
-  pendingMaxMs: 15 * 60 * 1000,
+  pendingMaxMs: 15 * 60 * 1000,   // legacy config; uncertain spend work no longer expires
+  autoCatchup: true,              // false only for a bounded, single-writer operator replay
 });
 
 export {actionOf} from '../contracts/kaswin-f3.mjs';   // compatibility re-export
@@ -307,6 +308,8 @@ export class Engine {
   }
   async header(hash) {
     const b = (await this.node.getBlock({hash, includeTransactions: false})).block;
+    const returned = b.header?.hash ?? b.verboseData?.hash;
+    if (returned != null && String(returned) !== hash) throw Error('HEADER_HASH_MISMATCH');
     return {hash, daa: BigInt(b.header.daaScore), blueScore: BigInt(b.header.blueScore), isChain: b.verboseData?.isChainBlock === true,
       selectedParent: b.verboseData?.selectedParentHash ? String(b.verboseData.selectedParentHash) : null};
   }
@@ -400,7 +403,21 @@ export class Engine {
       if (!isFullTransaction(tx)) throw Error('CANDIDATE_MISSING_CONSENSUS_FIELDS');
       return this.applySpend(rec, {txid: txidOf(tx), tx, containing: fast.containing, source: 'vc-full'}, fast.acc);
     }
-    const starts = replayStart ? [replayStart] : this.startsFor(rec, eventAt);
+    // A current tip cannot be spent before its creating transaction was accepted.
+    // Start at that block's selected parent (also includes same-block descendants), NOT
+    // at today's checkpoint: a historical spender would be behind every new near-start.
+    const created = await this.header(rec.data.accepting);
+    if (!created.isChain) {
+      const t = this.store.latestActive(roundId);
+      if (!t || t.accepting !== rec.data.accepting) throw Error('TIP_ACCEPTANCE_CONTEXT');
+      await this.rollback(t); return 'ROLLED_BACK';
+    }
+    const starts = [...new Set([replayStart, created.selectedParent ?? created.hash].filter(Boolean))];
+    const tipKey = outpointKey(tip);
+    if (this.store.getMeta(`window-tip:${roundId}`) !== tipKey) {
+      this.store.setMeta(`window:${roundId}`, null);
+      this.store.setMeta(`window-tip:${roundId}`, tipKey);
+    }
     let candidates = await this.fromMempool(rec.address, tip, rec.data.cid);
     if (!candidates.length) {
       // Bounded accepted-chain walk (replaces the getBlocks body scan): newest start first, older starts only if needed.
@@ -439,6 +456,32 @@ export class Engine {
     if (!isFullTransaction(chosen.tx)) throw Error('CANDIDATE_MISSING_CONSENSUS_FIELDS');
     chosen = await this.bindAccepted(chosen, acc);
     return this.applySpend(rec, chosen, acc);
+  }
+
+  /** Operator-provided txid/block are location hints ONLY. Fetch the CURRENT selected-chain
+   * Full accepted instance, bind its exact input to our tip, then use the normal plugin/commit.
+   * No local receipt body, state or balance is trusted or imported. */
+  async resolveAcceptedHint(roundId, {txid, accepting}) {
+    if (![roundId,txid,accepting].every(x => /^[0-9a-f]{64}$/.test(x))) throw Error('HINT_ID');
+    const rec = this.store.round(roundId);
+    if (!rec || rec.status !== 'LIVE') throw Error('HINT_ROUND_NOT_LIVE');
+    const acc = await this.header(accepting);
+    if (!acc.isChain || !acc.selectedParent) throw Error('HINT_NOT_CHAIN');
+    const sink = BigInt((await this.node.getSinkBlueScore()).blueScore);
+    if (sink < acc.blueScore) throw Error('HINT_SINK_BEHIND');
+    const min = sink - acc.blueScore > 1n ? Number(sink - acc.blueScore - 1n) : 0;
+    const r = await this.node.getVirtualChainFromBlockV2({startHash:acc.selectedParent,dataVerbosityLevel:'Full',minConfirmationCount:min});
+    const added = (r.addedChainBlockHashes ?? []).map(String), rows = r.chainBlockAcceptedTransactions ?? [];
+    if ((r.removedChainBlockHashes ?? []).length || rows.length !== added.length) throw Error('HINT_REORG_OR_ROWS');
+    const at = added.indexOf(accepting), row = rows[at];
+    if (at < 0 || String(row?.chainBlockHeader?.hash) !== accepting || BigInt(row.chainBlockHeader.daaScore) !== acc.daa) throw Error('HINT_ACCEPTANCE_HEADER');
+    const hits = (row.acceptedTransactions ?? []).filter(t=>txidOf(t)===txid);
+    if (hits.length !== 1) throw Error('HINT_NOT_ACCEPTED');
+    const t = canonical(hits[0]);
+    if (!isFullTransaction(t) || !spends(t,rec.data.tip)) throw Error('HINT_NOT_TIP_SPEND');
+    const recheck = await this.header(accepting);
+    if (!recheck.isChain || recheck.daa !== acc.daa || recheck.blueScore !== acc.blueScore || recheck.selectedParent !== acc.selectedParent) throw Error('HINT_REORG');
+    return this.applySpend(rec, {txid,tx:t,containing:t.verboseData?.blockHash ?? null,source:'operator-hint+node-full-accepted'},acc);
   }
 
   async applySpend(rec, chosen, acc) {
@@ -491,7 +534,7 @@ export class Engine {
     }
     if (rec?.address && rec.status === 'LIVE') await this.unsubscribe(rec.address);
     this.store.log('APPLIED', {round: next.id, seq, kind, txid: chosen.txid, accepting: acc.hash, utxoCheck}, now);
-    if (next.tip && utxoCheck !== 'SUCCESSOR_LIVE_MATCHES') this.run('spend:' + next.id, () => this.resolveSpend(next.id));
+    if (next.tip && utxoCheck !== 'SUCCESSOR_LIVE_MATCHES' && this.config.autoCatchup) this.run('spend:' + next.id, () => this.resolveSpend(next.id));
     return 'APPLIED';
   }
 
@@ -513,11 +556,8 @@ export class Engine {
     }
     const p = this.pending.get(key) ?? {...info, since: this.now()};
     p.reason = reason; p.candidates = candidates; this.pending.set(key, p);
-    if (this.now() - p.since > this.config.pendingMaxMs) {
-      this.pending.delete(key);
-      this.store.log('PENDING_EXPIRED', {key, reason, candidates}, this.now());
-      return 'EXPIRED';
-    }
+    // A missing spender does not expire with wall time. The tip and durable window
+    // cursor survive restart; reconcile requeues it. Never drop uncertain work by TTL.
     return 'PENDING';
   }
   retryPending() {

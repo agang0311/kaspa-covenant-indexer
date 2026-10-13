@@ -1,15 +1,16 @@
-# Kaswin Event Indexer (`kaswin-indexer`)
+# Kaspa Covenant Indexer (`kaspa-covenant-indexer` / KCI)
 
 [English](./README.en.md) | [简体中文](./README.md)
 
-Kaspa Testnet 10 上的 Kaswin 状态契约（Covenant）只读事件索引器与 CID REST 服务的独立自包含发布版本。
+Kaspa 状态契约（Stateful Covenant）通用事件索引器、CID REST 服务与 Admin 管理控制台的独立自包含发布版本。
+全面支持 **Kaspa Testnet 10 (TN10)**、**SilverScript** 与 **Argent** 契约生命周期管理。
 
-本项目用于监听链上事件、定位花费者、验证选定链 acceptance、核验固定契约规则（默认 **V2**，兼容旧版 **F3.2** 与 **F3** 终局轮次），并为前端 DApp / Kaswin Web 提供低延迟的 CID 只读接口。
-
-- **纯只读与安全**：不持私钥、不签名、不广播交易。
-- **双节点热备池**：内置 TN10 Seed + Resolver 自动探测与故障转移。
-- **无持续扫链**：基于 UTXO 通知与针对性 spender 检索，极低带宽占用与 CPU 消耗。
-- **零外部依赖**：已内置 Node.js 22+ 兼容的固定 Kaspa WASM SDK (2.0.1) 与编译后契约规则包。
+本项目用于监听链上事件、定位花费者、验证选定链 acceptance、核验多版本契约状态机规则（内置 **Kaswin V2** `7aaf76fe`、**F3.2** `7ca61d81` 与 **F3** `1dc41809`），并提供：
+- 🔍 **CID REST 查询 API**：为各类前端 DApp / Web 提供高并发、零延迟的契约最新状态只读查询；
+- 🖥️ **Web 控制台 (`/admin`)**：内置现代化暗黑管理面板，支持实时节点连通性测速、节点健康体检、内存/负载监控与合约插件热启停；
+- 🛡️ **纯只读与安全隔离**：链上无私钥、不签名、不广播；管理 API 全面受 Admin Token 认证保护，隔绝越权与注入风险；
+- ⚡ **无持续扫链**：基于 UTXO 通知与针对性 spender 检索，低内存占用（<100MB RSS）与轻量化运算；
+- 📦 **零外部依赖**：已内置 Node.js 22+ 兼容的固定 Kaspa WASM SDK (2.0.1) 与编译后契约规则包。
 
 ---
 
@@ -20,10 +21,10 @@ Kaspa Testnet 10 上的 Kaswin 状态契约（Covenant）只读事件索引器�
 ### 1. 使用 Docker Compose 一键启动
 
 ```bash
-git clone https://github.com/agang0311/kaswin-indexer.git
-cd kaswin-indexer
+git clone https://github.com/agang0311/kaspa-covenant-indexer.git
+cd kaspa-covenant-indexer
 
-# （可选）配置自定义节点或注册表地址：
+# （可选）配置管理员 Token 或自定义节点：
 cp .env.example .env
 
 # 一键启动
@@ -33,19 +34,20 @@ docker compose up -d
 ### 2. 使用纯 Docker 命令运行
 
 ```bash
-docker build -t kaswin-indexer .
+docker build -t kaspa-covenant-indexer .
 
-docker run -d --name kaswin-indexer \
+docker run -d --name kaspa-covenant-indexer \
   -p 8788:8788 \
-  -v kaswin-indexer-data:/data \
+  -e ADMIN_TOKEN="your-admin-token" \
+  -v kaspa-covenant-indexer-data:/data \
   --restart unless-stopped \
-  kaswin-indexer
+  kaspa-covenant-indexer
 ```
 
-启动约 10~15 秒（完成双节点探测与订阅握手）后，访问测试：
-```bash
-curl http://localhost:8788/v1/rounds
-```
+启动约 10~15 秒（完成双节点探测与订阅握手）后：
+- 访问只读 API：`curl http://localhost:8788/v1/rounds`
+- 访问管理面板：浏览器打开 `http://localhost:8788/admin`
+
 
 ---
 

@@ -1,7 +1,7 @@
 {
-  "name": "kaswin-indexer",
+  "name": "kaspa-covenant-indexer",
   "version": "1.0.0",
-  "description": "Kaswin covenant event indexer and CID REST service on Kaspa Testnet 10 (F3.2 / F3)",
+  "description": "Kaspa Stateful Covenant Event Indexer, CID REST Service & Admin Studio (SilverScript & Argent)",
   "private": true,
   "type": "module",
   "engines": {

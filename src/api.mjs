@@ -1,5 +1,6 @@
-// Read-only cache API. No RPC, wallet, or transaction submission endpoints.
+// Read-only cache API and Admin Management API.
 import http from 'node:http';
+import {handleAdmin} from './admin.mjs';
 const HASH = /^[0-9a-f]{64}$/;
 /** Reorg recheck depth (project policy, same as the Kaswin page; NOT consensus finality). Read-only VSPC monitor:
  * deepest observed selected-chain removal 83 DAA (mainnet 24 h, run incomplete), 75 DAA (TN10 5.3 h). */
@@ -19,8 +20,10 @@ export function acceptanceOf(t, virtualDaa) {
   const acceptance = t.status === 'FINAL' ? 'FINAL' : depth >= REORG_RECHECK_DAA ? 'ACCEPTED' : 'CONFIRMING';
   return {acceptance, acceptingDaa: String(acceptingDaa), depthDaa: String(depth)};
 }
+/** Contract families whose live phases are exactly 1 (open), 2 (sealed), 5 (refunding): V2 and contract V2.0.1. */
+export const V2_FAMILY = ['kaswin-v2@', 'kaswin-v2.0.1@'];
 export function categoryOf(r) {
-  const v2 = r.contract?.startsWith('kaswin-v2@');
+  const v2 = V2_FAMILY.some(p => r.contract?.startsWith(p));
   if (r.status === 'STALE' || (!v2 && !r.contract?.startsWith('kaswin-f3@'))) return 'unknown';
   if (r.status === 'TERMINAL') return 'close';
   const p = r.data.state?.phase;
@@ -37,10 +40,22 @@ function view(r, detail = false, store = null, virtualDaa = null) {
     updatedAt: r.updatedAt, liveSeenAt: r.liveSeenAt, ...(acc ?? {}), ...(store ? {tipSpentSeenAt: spentAt} : {}),
     ...(detail ? {state: d.state, purchases: d.purchases, origin: d.origin, scriptPublicKey: d.spk} : {})};
 }
-export function createApi({store, corsOrigin = '*'}) {
+export function createApi({
+  store,
+  corsOrigin = '*',
+  engine = null,
+  contracts = null,
+  node = null,
+  sdk = null,
+  network = 'testnet-10',
+  adminToken = null,
+  contractsPath = null,
+  openMember = null,
+  log = () => {}
+}) {
   const isNone = corsOrigin === false || corsOrigin === null || corsOrigin === 'none';
   if (!isNone && corsOrigin !== '*' && !/^https?:\/\/[^/]+$/.test(corsOrigin)) throw Error('INVALID_CORS_ORIGIN');
-  const server = http.createServer((req, res) => {
+  const server = http.createServer(async (req, res) => {
     const send = (status, body) => {
       res.writeHead(status, {'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff'});
       res.end(JSON.stringify(body, (_, v) => typeof v === 'bigint' ? v.toString() : v));
@@ -48,19 +63,34 @@ export function createApi({store, corsOrigin = '*'}) {
     if (!isNone) {
       if (corsOrigin === '*') {
         res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-        res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
       } else if (req.headers.origin === corsOrigin) {
         res.setHeader('Access-Control-Allow-Origin', corsOrigin);
         res.setHeader('Vary', 'Origin');
-        res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-        res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
       }
     }
     if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+
+    const url = new URL(req.url, 'http://localhost');
+
+    // Admin dashboard & API handler
+    if (url.pathname.startsWith('/admin')) {
+      try {
+        const handled = await handleAdmin(req, res, {
+          store, engine, contracts, node, sdk, network, adminToken, contractsPath, openMember, log
+        });
+        if (handled) return;
+      } catch (err) {
+        send(500, {ok: false, error: 'ADMIN_HANDLER_ERROR', detail: err.message});
+        return;
+      }
+    }
+
     if (req.method !== 'GET') { res.setHeader('Allow', 'GET, OPTIONS'); send(405, {detail: 'METHOD_NOT_ALLOWED'}); return; }
     try {
-      const url = new URL(req.url, 'http://localhost');
       const cp = store.checkpointsBefore(Date.now() + 1, 1)[0] ?? null, virtualDaa = cp?.virtualDaa ?? null;
       const meta = {network: 'testnet-10', coverage: 'tracked-rounds-only', requiresIndependentVerification: true,
         lastCheckpointAt: cp?.at ?? null, virtualDaa: virtualDaa == null ? null : String(virtualDaa), reorgRecheckDaa: String(REORG_RECHECK_DAA),

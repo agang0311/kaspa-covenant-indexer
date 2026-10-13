@@ -18,5 +18,7 @@ export function runtimeOptions(cli, env = process.env) {
   }
   const cors = cli['cors-origin'] ?? env.KASWIN_CORS_ORIGIN;
   if (cors !== undefined) out['cors-origin'] = cors;
+  const adminToken = cli['admin-token'] ?? env.KASPA_INDEXER_ADMIN_TOKEN ?? env.ADMIN_TOKEN;
+  if (adminToken !== undefined) out['admin-token'] = adminToken;
   return out;
 }

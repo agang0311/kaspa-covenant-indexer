@@ -74,7 +74,8 @@ export class Store {
     return this.db.prepare("SELECT * FROM rounds WHERE json_extract(data,'$.cid')=? AND status!='ROLLED_BACK' LIMIT 2").all(cid).map(rowRound);
   }
   cidPage(after, limit, category = null) {
-    const bucket = `CASE WHEN status='STALE' OR (contract NOT LIKE 'kaswin-f3@%' AND contract NOT LIKE 'kaswin-v2@%') THEN 'unknown'
+    // Same rule as api.mjs categoryOf (V2 family: kaswin-v2@, kaswin-v2.0.1@). '.' is literal in LIKE.
+    const bucket = `CASE WHEN status='STALE' OR (contract NOT LIKE 'kaswin-f3@%' AND contract NOT LIKE 'kaswin-v2@%' AND contract NOT LIKE 'kaswin-v2.0.1@%') THEN 'unknown'
       WHEN status='TERMINAL' THEN 'close'
       WHEN json_extract(data,'$.state.phase')=1 THEN 'open'
       WHEN json_extract(data,'$.state.phase')=2 OR (contract LIKE 'kaswin-f3@%' AND json_extract(data,'$.state.phase') IN (3,4)) THEN 'sealed'
@@ -88,7 +89,10 @@ export class Store {
     const old = this.db.prepare('SELECT contract FROM rounds WHERE id=?').get(round.id);
     if (old && old.contract !== contract) throw Error('ROUND_CONTRACT_CANNOT_CHANGE');   // a covenant's rules are fixed at Genesis
     this.db.prepare(`INSERT INTO rounds(id,contract,data,address,status,live_seen_at,updated_at) VALUES(?,?,?,?,?,NULL,?)
-      ON CONFLICT(id) DO UPDATE SET data=excluded.data,address=excluded.address,status=excluded.status,updated_at=excluded.updated_at`)
+      ON CONFLICT(id) DO UPDATE SET data=excluded.data,address=excluded.address,status=excluded.status,
+        live_seen_at=CASE WHEN json_extract(rounds.data,'$.tip.transactionId')=json_extract(excluded.data,'$.tip.transactionId')
+          AND json_extract(rounds.data,'$.tip.index')=json_extract(excluded.data,'$.tip.index') THEN rounds.live_seen_at ELSE NULL END,
+        updated_at=excluded.updated_at`)
       .run(round.id, contract, enc(round), round.tip ? address : null, status, now);
   }
   markLiveSeen(id, at) { this.db.prepare('UPDATE rounds SET live_seen_at=? WHERE id=?').run(at, id); this.setMeta('tipSpent:' + id, null); }

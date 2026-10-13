@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Kaswin Event Indexer 一键安装与部署脚本 (Linux x86_64 / arm64)
+# Kaspa Covenant Indexer (KCI) 一键安装与部署脚本 (Linux x86_64 / arm64)
 # 支持 Ubuntu 20.04+, Debian 11+, CentOS 8+ 等带 systemd 的环境
 
 set -euo pipefail
@@ -20,12 +20,12 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-INSTALL_DIR="/opt/kaswin-indexer"
-DATA_DIR="/var/lib/kaswin-indexer"
-SERVICE_NAME="kaswin-indexer.service"
-USER_NAME="kaswin-index"
+INSTALL_DIR="/opt/kaspa-covenant-indexer"
+DATA_DIR="/var/lib/kaspa-covenant-indexer"
+SERVICE_NAME="kaspa-covenant-indexer.service"
+USER_NAME="kaspa-indexer"
 
-info "=== 开始部署 Kaswin TN10 Event Indexer ==="
+info "=== 开始部署 Kaspa Covenant Indexer (KCI) ==="
 
 # 1. 检查或准备 Node.js (需要 >= 22.0.0)
 NODE_BIN=""
@@ -86,7 +86,7 @@ chmod -R 755 "$INSTALL_DIR"
 info "配置 systemd 服务: $SERVICE_NAME..."
 cat > "/etc/systemd/system/$SERVICE_NAME" <<EOF
 [Unit]
-Description=Kaswin TN10 Event Indexer and CID REST
+Description=Kaspa Covenant Indexer (KCI) & CID REST
 After=network-online.target
 Wants=network-online.target
 
@@ -104,7 +104,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=$DATA_DIR
+ReadWritePaths=$DATA_DIR $INSTALL_DIR/contracts
 MemoryMax=384M
 TasksMax=32
 UMask=0077
@@ -133,6 +133,7 @@ if [[ $SUCCESS -eq 1 ]]; then
   ok "=== 部署成功！==="
   echo ""
   echo "  - REST API 地址: http://127.0.0.1:8788/v1/rounds"
+  echo "  - Web 管理控制台: http://127.0.0.1:8788/admin"
   echo "  - 数据库文件路径: $DATA_DIR/events.sqlite"
   echo "  - 配置文件路径:   $INSTALL_DIR/.env"
   echo ""

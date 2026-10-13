@@ -3,10 +3,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
-import {createRoundAdapter} from '../src/adapter/rounds.mjs';
-import {registryScope, registrationOf, DEFAULT_REGISTRY_ADDRESS} from '../src/adapter/registry.mjs';
+import {createRoundAdapter} from '../../tn10-index/vps/rounds.mjs';
+import {registryScope, registrationOf, DEFAULT_REGISTRY_ADDRESS} from '../../tn10-index/vps/registry.mjs';
 
-export const DEFAULT_PACKAGE = fileURLToPath(new URL('../artifacts/f3/', import.meta.url));
+export const DEFAULT_PACKAGE = fileURLToPath(new URL('../../../references/kaswin-f3-open-genesis/package/', import.meta.url));
 const ACTIONS = ['?', 'BUY', 'CLOSE', 'DRAW', 'DRAW_AND_PAY', 'ACCEPT', 'ADVANCE_SAMPLE', 'ACCEPT_AND_PAY', 'PAY', 'TIMEOUT_REFUND', 'REFUND'];
 
 export function actionOf(tx) {
