@@ -319,6 +319,7 @@ input:focus, select:focus, textarea:focus {
   <button class="tab-btn active" data-tab="tab-overview">📊 运行概览</button>
   <button class="tab-btn" data-tab="tab-nodes">⚡ 节点控制与测速</button>
   <button class="tab-btn" data-tab="tab-plugins">🧩 合约插件管理</button>
+  <button class="tab-btn" data-tab="tab-compiler">🛠️ SilverScript 编译工坊</button>
   <button class="tab-btn" data-tab="tab-journal">📜 事件日志</button>
 </nav>
 
@@ -425,13 +426,65 @@ input:focus, select:focus, textarea:focus {
       </table>
     </div>
 
-    <!-- Phase 2 预告展板 -->
-    <div class="card" style="border:1px dashed var(--border-light);background:rgba(16,23,38,0.4);">
-      <div class="section-title" style="color:var(--kaspa);">🛠️ SilverScript (.sil) 在线编译与插件生成 (Phase 2 规划)</div>
-      <p style="color:var(--muted);font-size:13px;margin:10px 0;">
-        即将支持：直接拖拽上传合约 <code>.sil</code> 源码，服务端自动调用 <code>silverc</code> 离线编译，生成对应 ABI、State 结构及模板哈希，并一键组装为可运行的 Indexer 插件。
-      </p>
+    <!-- Phase 2 编译工坊跳转卡片 -->
+    <div class="card" style="border:1px dashed var(--border-light);background:rgba(16,23,38,0.4);display:flex;justify-content:space-between;align-items:center;">
+      <div>
+        <div class="section-title" style="color:var(--kaspa);">🛠️ SilverScript (.sil) 在线编译器与插件生成</div>
+        <p style="color:var(--muted);font-size:13px;margin-top:4px;">
+          在线编写或上传 <code>.sil</code> 源码，调用 <code>silverc</code> 编译生成 ABI、State 结构与模版哈希。
+        </p>
+      </div>
+      <button class="btn btn-pri btn-sm" onclick="document.querySelector('[data-tab=\\'tab-compiler\\']').click()">前往编译工坊 →</button>
     </div>
+  </section>
+
+  <!-- TAB: SilverScript 编译工坊 -->
+  <section id="tab-compiler" class="view-panel">
+    <div class="section-head">
+      <div>
+        <div class="section-title">🛠️ SilverScript 在线编译器与契约工坊 (SilverScript Studio)</div>
+        <p style="color:var(--muted);font-size:13px;margin-top:4px;">
+          在线编写、语法解析并编译 SilverScript 契约，自动提取 State 状态机字段、方法入口 Dispatch Tag 与模版哈希（Template Hash）。
+        </p>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <input type="file" id="fileUploadSil" accept=".sil" style="display:none;">
+        <button class="btn btn-sm" id="btnUploadSil">📂 上传本地 .sil</button>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:20px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <label style="color:var(--muted);font-size:12px;font-weight:600;">契约预设模版:</label>
+          <select id="selectContractPreset" style="width:280px;padding:5px 8px;font-size:12px;">
+            <option value="counter">计数器合约 (Counter.sil · 单例状态机)</option>
+            <option value="empty">空白契约模版 (Custom.sil)</option>
+          </select>
+        </div>
+        <span class="tag tag-active" style="font-size:11px;">silverc v0.1.0 就绪</span>
+      </div>
+
+      <div style="margin-bottom:14px;">
+        <textarea id="silEditor" class="mono" style="height:220px;font-size:13px;line-height:1.6;" spellcheck="false"></textarea>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;">
+        <div>
+          <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px;">
+            构造函数入参 Constructor Arguments (JSON 数组, 如 <code>[0]</code> 或 <code>[{"kind":"int","value":0}]</code>):
+          </label>
+          <input type="text" id="inputCtorArgs" class="mono" value="[0]" placeholder="[0] 或留空">
+        </div>
+        <div style="display:flex;gap:8px;padding-top:16px;">
+          <button class="btn" id="btnAstOnly">🔍 语法解析 (AST Only)</button>
+          <button class="btn btn-pri" id="btnCompileSil">⚡ 执行编译 (Full Compile)</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 编译结果容器 -->
+    <div id="compilerResultBox" style="display:none;margin-top:20px;"></div>
   </section>
 
   <!-- TAB 4: 事件日志 -->
@@ -711,6 +764,149 @@ document.getElementById('btnReloadPlugins').onclick = () => {
   loadPluginsTab();
   showToast('插件列表已刷新');
 };
+
+// SilverScript Studio Workbench
+const PRESET_CONTRACTS = {
+  counter: "contract Decls(int init_value) {\\n    int value = init_value;\\n\\n    #[covenant.singleton(mode = transition)]\\n    function bump(State prev_state, int delta) : (State) {\\n        return(State { value: prev_state.value + delta });\\n    }\\n}",
+  empty: "contract CustomContract() {\\n    int count = 0;\\n\\n    #[covenant.singleton(mode = transition)]\\n    function step(State prev_state) : (State) {\\n        return(State { count: prev_state.count + 1 });\\n    }\\n}"
+};
+
+const editor = document.getElementById('silEditor');
+if (editor) editor.value = PRESET_CONTRACTS.counter;
+
+const presetSelect = document.getElementById('selectContractPreset');
+if (presetSelect) {
+  presetSelect.onchange = e => {
+    const v = e.target.value;
+    if (PRESET_CONTRACTS[v] && editor) {
+      editor.value = PRESET_CONTRACTS[v];
+      const ctorInput = document.getElementById('inputCtorArgs');
+      if (ctorInput) ctorInput.value = v === 'counter' ? '[0]' : '[]';
+    }
+  };
+}
+
+const btnUpload = document.getElementById('btnUploadSil');
+const fileInput = document.getElementById('fileUploadSil');
+if (btnUpload && fileInput) {
+  btnUpload.onclick = () => fileInput.click();
+  fileInput.onchange = e => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = evt => {
+      if (editor) editor.value = evt.target.result;
+      showToast('已载入本地文件: ' + file.name, 'var(--emerald)');
+    };
+    reader.readAsText(file);
+  };
+}
+
+window.copyTemplateHash = function(el) {
+  const hash = el.getAttribute('data-hash');
+  if (hash && navigator.clipboard) {
+    navigator.clipboard.writeText(hash);
+    showToast('已复制模版哈希！', 'var(--emerald)');
+  }
+};
+
+async function runCompilation(astOnly) {
+  const box = document.getElementById('compilerResultBox');
+  if (!box || !editor) return;
+  box.style.display = 'block';
+  box.innerHTML = '<div class="card" style="color:var(--muted);">正在调用 silverc 编译器执行' + (astOnly ? '语法解析' : '全量编译') + '...</div>';
+
+  const source = editor.value;
+  let constructorArgs = null;
+  const ctorRaw = (document.getElementById('inputCtorArgs')?.value || '').trim();
+  if (ctorRaw) {
+    try {
+      constructorArgs = JSON.parse(ctorRaw);
+    } catch (err) {
+      box.innerHTML = '<div class="card" style="border-color:var(--rose);color:var(--rose);">构造函数入参不是合法的 JSON 格式: ' + err.message + '</div>';
+      return;
+    }
+  }
+
+  try {
+    const res = await api('/compile', 'POST', {
+      source,
+      filename: 'contract.sil',
+      constructorArgs,
+      astOnly: Boolean(astOnly)
+    });
+
+    if (astOnly) {
+      renderAstResult(res, box);
+    } else {
+      renderCompileResult(res, box);
+    }
+  } catch (err) {
+    box.innerHTML = '<div class="card" style="border-color:var(--rose);background:rgba(244,63,94,0.1);">' +
+      '<strong style="color:var(--rose);">❌ 编译失败 (Compiler Error)</strong>' +
+      '<pre class="mono" style="margin-top:10px;font-size:12px;color:var(--text);white-space:pre-wrap;word-break:break-all;">' +
+      (err.message || '未知编译错误') +
+      '</pre></div>';
+  }
+}
+
+function renderAstResult(data, box) {
+  const fields = (data.fields || []).map(f => '<tr><td class="mono">' + f.name + '</td><td class="mono">' + f.type + '</td></tr>').join('') || '<tr><td colspan="2" style="color:var(--muted);">无独立字段</td></tr>';
+  const functions = (data.functions || []).map(fn => '<tr><td class="mono"><b>' + fn.name + '</b></td><td class="mono">' + (fn.params || []).map(p => (p.type || '') + ' ' + (p.name || '')).join(', ') + '</td></tr>').join('') || '<tr><td colspan="2" style="color:var(--muted);">无方法</td></tr>';
+
+  box.innerHTML = '<div class="section-title" style="margin-bottom:12px;">🔍 语法解析成功 (AST 解析结果)</div>' +
+    '<div class="grid-cards" style="margin-bottom:16px;">' +
+      '<div class="card"><div class="card-label">契约名称</div><div class="card-val mono" style="font-size:18px;">' + data.contractName + '</div></div>' +
+      '<div class="card"><div class="card-label">状态字段数</div><div class="card-val mono">' + (data.fields ? data.fields.length : 0) + '</div></div>' +
+      '<div class="card"><div class="card-label">方法入口数</div><div class="card-val mono">' + (data.functions ? data.functions.length : 0) + '</div></div>' +
+    '</div>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">' +
+      '<div class="card" style="padding:0;overflow:hidden;">' +
+        '<div style="padding:12px 14px;font-weight:700;border-bottom:1px solid var(--border);">📊 状态变量声明 (State Fields)</div>' +
+        '<table><thead><tr><th>字段名</th><th>类型</th></tr></thead><tbody>' + fields + '</tbody></table>' +
+      '</div>' +
+      '<div class="card" style="padding:0;overflow:hidden;">' +
+        '<div style="padding:12px 14px;font-weight:700;border-bottom:1px solid var(--border);">⚡ 方法声明 (Functions)</div>' +
+        '<table><thead><tr><th>方法名</th><th>参数签名</th></tr></thead><tbody>' + functions + '</tbody></table>' +
+      '</div>' +
+    '</div>';
+}
+
+function renderCompileResult(data, box) {
+  const c = data.contracts && data.contracts[0];
+  if (!c) {
+    box.innerHTML = '<div class="card">未生成有效合约产物</div>';
+    return;
+  }
+
+  const entriesHtml = (c.entries || []).map(e => '<tr>' +
+    '<td class="mono"><b>' + e.key + '</b></td>' +
+    '<td><span class="tag tag-active mono">' + e.dispatchTag + '</span></td>' +
+    '<td class="mono">' + (e.params || []).map(p => (p.type?.kind || 'any') + ' ' + p.name).join(', ') + '</td>' +
+  '</tr>').join('') || '<tr><td colspan="3" style="color:var(--muted);">无外部入口</td></tr>';
+
+  box.innerHTML = '<div class="section-title" style="margin-bottom:12px;">🎉 契约编译成功 (SilverScript Artifact)</div>' +
+    '<div class="card" style="border-color:var(--kaspa);background:rgba(112,199,186,0.06);margin-bottom:16px;">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
+        '<div class="card-label" style="color:var(--kaspa);font-weight:700;margin:0;">模版哈希 (Template Hash · 32-Byte)</div>' +
+        '<button class="btn btn-sm" data-hash="' + c.templateHashHex + '" onclick="window.copyTemplateHash(this)">📋 复制哈希</button>' +
+      '</div>' +
+      '<div class="mono" style="font-size:15px;color:var(--text);word-break:break-all;font-weight:600;">' + c.templateHashHex + '</div>' +
+      '<div style="font-size:12px;color:var(--muted);margin-top:6px;">字节码大小: ' + c.bytecodeLength + ' 字节 | 状态切片偏移: ' + c.stateSpan.offset + ' (长度 ' + c.stateSpan.len + ')</div>' +
+    '</div>' +
+    '<div class="card" style="padding:0;overflow:hidden;margin-bottom:16px;">' +
+      '<div style="padding:12px 14px;font-weight:700;border-bottom:1px solid var(--border);">⚡ 方法入口与调度标签 (Entrypoints & Dispatch Tags)</div>' +
+      '<table><thead><tr><th>方法标识</th><th>Dispatch Tag</th><th>入参</th></tr></thead><tbody>' + entriesHtml + '</tbody></table>' +
+    '</div>' +
+    '<details class="card" style="cursor:pointer;"><summary style="font-weight:600;color:var(--muted);">📦 查看完整编译器 JSON Artifact</summary>' +
+      '<pre class="mono" style="margin-top:12px;font-size:11px;overflow:auto;max-height:300px;">' + JSON.stringify(data.artifact, null, 2) + '</pre>' +
+    '</details>';
+}
+
+const btnAst = document.getElementById('btnAstOnly');
+if (btnAst) btnAst.onclick = () => runCompilation(true);
+const btnComp = document.getElementById('btnCompileSil');
+if (btnComp) btnComp.onclick = () => runCompilation(false);
 
 // Auto refresh every 5 seconds
 setInterval(() => {

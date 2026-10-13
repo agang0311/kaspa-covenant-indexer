@@ -4,6 +4,7 @@ import path from 'node:path';
 import {ADMIN_HTML} from './admin-html.mjs';
 import {categoryOf} from './api.mjs';
 import {loadContracts} from './contracts.mjs';
+import {compileSilverScript} from './compiler.mjs';
 
 export function verifyAdminToken(req, expectedToken) {
   if (!expectedToken) return false;
@@ -225,6 +226,24 @@ export async function handleAdmin(req, res, ctx) {
         });
       } catch (err) {
         send(500, {ok: false, error: err.message});
+      }
+      return true;
+    }
+
+    // 5. Compile SilverScript Contract (.sil)
+    if (sub === '/compile' && req.method === 'POST') {
+      try {
+        const body = await readBody(req);
+        const {source, filename, constructorArgs, astOnly} = body;
+        const resCompile = await compileSilverScript({
+          source,
+          filename,
+          constructorArgs,
+          astOnly: Boolean(astOnly)
+        });
+        send(resCompile.ok ? 200 : 400, resCompile);
+      } catch (err) {
+        send(500, {ok: false, error: 'COMPILER_INTERNAL_ERROR', detail: err.message});
       }
       return true;
     }
