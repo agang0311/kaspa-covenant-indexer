@@ -467,7 +467,10 @@ input:focus, select:focus, textarea:focus {
       <div style="margin-bottom:14px;">
         <input type="password" id="inputAdminToken" placeholder="输入 32 位 Token 或自定义密码..." required autofocus>
       </div>
-      <button type="submit" class="btn btn-pri" style="width:100%;justify-content:center;">确认登录</button>
+      <div style="display:flex;gap:10px;">
+        <button type="submit" class="btn btn-pri" style="flex:1;justify-content:center;">确认登录</button>
+        <button type="button" class="btn" id="btnCancelAuth" style="justify-content:center;">暂不登录</button>
+      </div>
     </form>
   </div>
 </div>
@@ -491,7 +494,9 @@ function showToast(text, color = '') {
   setTimeout(() => el.style.display = 'none', 3000);
 }
 
-const apiPrefix = (window.location.pathname.replace(/\/admin(?:\/.*)?$/, '') || '') + '/admin/api';
+const p = window.location.pathname;
+const adminIdx = p.indexOf('/admin');
+const apiPrefix = (adminIdx > 0 ? p.slice(0, adminIdx) : '') + '/admin/api';
 
 async function api(path, method = 'GET', body = null) {
   const headers = { 'Accept': 'application/json' };
@@ -671,14 +676,24 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
 });
 
 // Auth Form Submit
-document.getElementById('authForm').onsubmit = e => {
+document.getElementById('authForm').onsubmit = async e => {
   e.preventDefault();
   const token = document.getElementById('inputAdminToken').value.trim();
   if (token) {
     currentToken = token;
     sessionStorage.setItem('kci_admin_token', token);
-    refreshAll();
+    try {
+      await refreshAll();
+      showToast('登录成功！', 'var(--emerald)');
+      document.getElementById('authModal').style.display = 'none';
+    } catch (err) {
+      showToast('Token 无效，请重新输入', 'var(--rose)');
+    }
   }
+};
+
+document.getElementById('btnCancelAuth').onclick = () => {
+  document.getElementById('authModal').style.display = 'none';
 };
 
 document.getElementById('btnLogout').onclick = () => {
