@@ -73,7 +73,8 @@ export async function loadContracts(configPath, ctx = {}) {
   if (!Array.isArray(cfg.contracts) || !cfg.contracts.length) throw Error('CONTRACTS_CONFIG_EMPTY');
   const base = path.dirname(path.resolve(configPath)), plugins = [];
   for (const [i, c] of cfg.contracts.entries()) {
-    const file = /[\\/]/.test(c.module) ? path.resolve(base, c.module) : path.join(BUILTIN_DIR, c.module);
+    const fileInBase = path.resolve(base, c.module);
+    const file = fs.existsSync(fileInBase) ? fileInBase : (/[\\/]/.test(c.module) ? fileInBase : path.join(BUILTIN_DIR, c.module));
     const sha = crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
     if (c.sha256 && c.sha256 !== sha) throw Error(`CONTRACT_MODULE_HASH_MISMATCH ${c.module} expected ${c.sha256} got ${sha}`);
     // Cache bust using file SHA so hot updates re-import cleanly in Node.js ESM

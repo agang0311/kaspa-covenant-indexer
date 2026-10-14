@@ -132,7 +132,7 @@ export async function handleAdmin(req, res, ctx) {
           sink: cp?.sink ?? null,
           virtualDaa: cp?.virtualDaa?.toString() ?? null
         },
-        contracts: contracts ? contracts.describe() : [],
+        contracts: (engine?.contracts || contracts)?.describe() || [],
         journal: store.journal(25)
       });
       return true;
@@ -319,7 +319,7 @@ export async function handleAdmin(req, res, ctx) {
       send(200, {
         ok: true,
         contractsPath,
-        plugins: contracts ? contracts.describe() : [],
+        plugins: (engine?.contracts || contracts)?.describe() || [],
         config: rawConfig
       });
       return true;

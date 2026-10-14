@@ -1274,22 +1274,23 @@ async function loadPluginsTab() {
     const list = res.plugins || [];
     const cfgList = res.config || [];
 
-    tbody.innerHTML = list.map((p, idx) => {
-      const cfg = cfgList[idx] || {};
+    tbody.innerHTML = cfgList.map((cfg, idx) => {
+      const p = list.find(x => x.module === cfg.module || x.module === './' + cfg.module) || list[idx] || {};
       const regCount = (cfg.options?.registryAddresses?.length) || 0;
       const watchText = regCount ? ('<span class="tag tag-standby">' + regCount + ' 个地址</span>') : '<span style="color:var(--dim);">无监听</span>';
+      const keyName = p.key || (cfg.options?.id ? (cfg.options.id + '@' + (cfg.options.version || '1.0.0')) : cfg.module);
 
       return '<tr>' +
-        '<td class="mono"><b>' + p.key + '</b></td>' +
-        '<td class="mono">' + (p.module || '-') + '</td>' +
+        '<td class="mono"><b>' + keyName + '</b></td>' +
+        '<td class="mono">' + (cfg.module || '-') + '</td>' +
         '<td class="mono" style="font-size:12px;color:var(--muted);">' + (p.profileId ? p.profileId.slice(0, 16) + '...' : '-') + '</td>' +
         '<td>' + watchText + '</td>' +
-        '<td>' + (p.retired ? '<span class="tag tag-retired">RETIRED (兼容)</span>' : '<span class="tag tag-active">ACTIVE (主导)</span>') + '</td>' +
+        '<td>' + (cfg.retired ? '<span class="tag tag-retired">RETIRED (兼容)</span>' : '<span class="tag tag-active">ACTIVE (主导)</span>') + '</td>' +
         '<td>' +
           '<div style="display:flex;gap:6px;">' +
             '<button class="btn btn-sm btn-pri" onclick="openPluginConfigModal(' + idx + ')">⚙️ 配置规则</button>' +
-            '<button class="btn btn-sm" onclick="togglePlugin(' + idx + ', ' + (!p.retired) + ')">' +
-              (p.retired ? '🟢 激活' : '⏸️ 退役') +
+            '<button class="btn btn-sm" onclick="togglePlugin(' + idx + ', ' + (!cfg.retired) + ')">' +
+              (cfg.retired ? '🟢 激活' : '⏸️ 退役') +
             '</button>' +
           '</div>' +
         '</td>' +
@@ -1303,15 +1304,15 @@ async function loadPluginsTab() {
 // Open Configuration Modal for any plugin in Tab 3
 window.openPluginConfigModal = function(idx) {
   const data = window._pluginsData;
-  if (!data || !data.plugins || !data.plugins[idx]) return;
+  if (!data || !data.config || !data.config[idx]) return;
 
   window._currentConfigIndex = idx;
-  const p = data.plugins[idx];
-  const cfg = (data.config && data.config[idx]) || {};
+  const cfg = data.config[idx] || {};
+  const p = (data.plugins || []).find(x => x.module === cfg.module || x.module === './' + cfg.module) || data.plugins[idx] || {};
   const opts = cfg.options || {};
 
-  document.getElementById('cfgModalPluginKey').innerText = p.key;
-  document.getElementById('cfgActiveToggle').checked = !p.retired;
+  document.getElementById('cfgModalPluginKey').innerText = p.key || (opts.id + '@' + (opts.version || '1.0.0'));
+  document.getElementById('cfgActiveToggle').checked = !cfg.retired;
 
   document.getElementById('cfgRegistryAddr').value = (opts.registryAddresses || []).join(', ');
   document.getElementById('cfgRegSompi').value = opts.registrationSompi || '5000000';
@@ -1320,24 +1321,46 @@ window.openPluginConfigModal = function(idx) {
 
   // Render dynamic field guards
   const listEl = document.getElementById('cfgDynamicFieldsList');
-  const guards = opts.initialStateGuards || {};
-  const entries = Object.entries(guards);
+  let guards = opts.initialStateGuards || {};
+  
+  // If not configured, check if it's a Kaswin contract and offer auto-prefill
+  const isKaswin = (cfg.module?.toLowerCase().includes('kaswin') || opts.id?.toLowerCase().includes('kaswin') || p.key?.toLowerCase().includes('kaswin'));
+  if (isKaswin && (!guards || !Object.keys(guards).length)) {
+    guards = {
+      phase: '1',
+      sold: '0',
+      purchaseCount: '0',
+      cursor: '0',
+      ticketPrice: '100000000',
+      ticketCap: '3',
+      minTickets: '3',
+      purchaseCap: '256'
+    };
+    if (!document.getElementById('cfgReqDeposit').value.trim()) {
+      document.getElementById('cfgReqDeposit').value = '400000000';
+    }
+    if (!document.getElementById('cfgRegistryAddr').value.trim()) {
+      document.getElementById('cfgRegistryAddr').value = 'kaspatest:qztrjpfpuf6g9jw76e6ay909z43hndpv5maqkker6ur4enz7llarsh82ezggl';
+    }
+  }
 
+  const entries = Object.entries(guards);
   if (!entries.length) {
     listEl.innerHTML = '<div style="color:var(--muted);font-size:11.5px;padding:6px 10px;background:rgba(0,0,0,0.2);border-radius:4px;">未配置初始状态字段约束（创世允许任意合规状态）</div>';
   } else {
-    listEl.innerHTML = entries.map(([k, v]) => {
-      return '<div class="field-invariant-row" style="display:flex;align-items:center;gap:8px;background:rgba(0,0,0,0.25);padding:6px 10px;border-radius:var(--radius-sm);border:1px solid var(--border);flex-wrap:wrap;">' +
-        '<label style="display:flex;align-items:center;gap:6px;min-width:140px;cursor:pointer;">' +
-          '<input type="checkbox" class="field-guard-toggle" data-name="' + k + '" checked>' +
-          '<strong class="mono" style="color:var(--text);font-size:12px;">' + k + '</strong>' +
-        '</label>' +
-        '<div style="flex:1;display:flex;align-items:center;gap:6px;min-width:160px;">' +
-          '<span style="color:var(--muted);font-size:11px;white-space:nowrap;">创世必须等于:</span>' +
-          '<input type="text" class="field-guard-val mono" data-name="' + k + '" value="' + v + '" style="padding:4px 8px;font-size:12px;height:28px;">' +
-        '</div>' +
-      '</div>';
-    }).join('');
+    listEl.innerHTML = (isKaswin ? '<div style="color:var(--kaspa);font-size:11px;font-weight:700;margin-bottom:2px;">📦 已自动匹配 Kaswin 创世业务状态机参数：</div>' : '') +
+      entries.map(([k, v]) => {
+        return '<div class="field-invariant-row" style="display:flex;align-items:center;gap:8px;background:rgba(0,0,0,0.25);padding:6px 10px;border-radius:var(--radius-sm);border:1px solid var(--border);flex-wrap:wrap;">' +
+          '<label style="display:flex;align-items:center;gap:6px;min-width:140px;cursor:pointer;">' +
+            '<input type="checkbox" class="field-guard-toggle" data-name="' + k + '" checked>' +
+            '<strong class="mono" style="color:var(--text);font-size:12px;">' + k + '</strong>' +
+          '</label>' +
+          '<div style="flex:1;display:flex;align-items:center;gap:6px;min-width:160px;">' +
+            '<span style="color:var(--muted);font-size:11px;white-space:nowrap;">创世必须等于:</span>' +
+            '<input type="text" class="field-guard-val mono" data-name="' + k + '" value="' + v + '" style="padding:4px 8px;font-size:12px;height:28px;">' +
+          '</div>' +
+        '</div>';
+      }).join('');
   }
 
   document.getElementById('pluginConfigModal').style.display = 'flex';
@@ -1617,22 +1640,59 @@ window.saveAndGoToPlugins = async function() {
 
     if (!genRes.ok) throw new Error(genRes.detail || '生成插件失败');
 
+    // Auto-extract initial parameters if available
+    const decoded = decodeLedgerFromArgs(window._lastConstructorArgs);
+    let initialGuards = null;
+    let reqDeposit = null;
+    let regAddresses = [];
+    let regSompi = '5000000';
+
+    if (decoded) {
+      reqDeposit = '400000000';
+      regAddresses = ['kaspatest:qztrjpfpuf6g9jw76e6ay909z43hndpv5maqkker6ur4enz7llarsh82ezggl'];
+      initialGuards = {
+        phase: '1',
+        sold: '0',
+        purchaseCount: '0',
+        cursor: '0',
+        ticketPrice: decoded.ticketPrice,
+        ticketCap: String(decoded.ticketCap),
+        minTickets: String(decoded.minTickets),
+        purchaseCap: String(decoded.purchaseCap)
+      };
+    } else {
+      const cData = window._lastArtifact?.contracts?.[cName];
+      const fields = cData?.runtime_state?.fields || [];
+      if (fields.length) {
+        initialGuards = {};
+        for (const f of fields) {
+          initialGuards[f.name] = (f.name === 'phase') ? '1' : '0';
+        }
+      }
+    }
+
     const instRes = await api('/install-plugin', 'POST', {
       filename,
       pluginId: pId,
       code: genRes.code,
       templateHash: genRes.templateHashHex,
+      requiredDeposit: reqDeposit,
+      registryAddresses: regAddresses,
+      registrationSompi: regSompi,
+      initialStateGuards: initialGuards,
       activate: true
     });
 
     if (instRes.ok) {
-      showToast('🎉 插件已成功保存！请在插件管理中配置守门规则', 'var(--emerald)');
+      showToast('🎉 插件已成功保存！已自动提取并注入创世参数', 'var(--emerald)');
       await refreshAll();
       await loadPluginsTab();
       // Switch to Plugins Tab
       document.querySelector('[data-tab="tab-plugins"]').click();
-      // Auto open config modal on the new plugin (index 0)
-      setTimeout(() => openPluginConfigModal(0), 200);
+      // Auto open config modal on the EXACT installed plugin
+      const targetIdx = (window._pluginsData?.config || []).findIndex(c => c.module === filename || c.module === './' + filename);
+      const openIdx = targetIdx >= 0 ? targetIdx : 0;
+      setTimeout(() => openPluginConfigModal(openIdx), 200);
     }
   } catch (err) {
     showToast('保存插件失败: ' + err.message, 'var(--rose)');
