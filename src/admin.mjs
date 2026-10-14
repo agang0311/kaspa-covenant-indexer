@@ -1,10 +1,12 @@
 // Admin Router & Handlers for Kaspa Covenant Indexer (KCI)
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import {ADMIN_HTML} from './admin-html.mjs';
 import {categoryOf} from './api.mjs';
 import {loadContracts} from './contracts.mjs';
 import {compileSilverScript} from './compiler.mjs';
+import {generatePluginCode} from './generator.mjs';
 import {TN10_SEED} from './node-pool.mjs';
 
 export function verifyAdminToken(req, expectedToken) {
@@ -376,6 +378,96 @@ export async function handleAdmin(req, res, ctx) {
         send(resCompile.ok ? 200 : 400, resCompile);
       } catch (err) {
         send(500, {ok: false, error: 'COMPILER_INTERNAL_ERROR', detail: err.message});
+      }
+      return true;
+    }
+
+    // 6. Generate Plugin Code from Artifact
+    if (sub === '/generate-plugin' && req.method === 'POST') {
+      try {
+        const body = await readBody(req);
+        const {artifact, contractName, pluginId, version} = body;
+        const resGen = generatePluginCode({artifact, contractName, pluginId, version});
+        send(200, resGen);
+      } catch (err) {
+        send(400, {ok: false, error: 'PLUGIN_GENERATION_FAILED', detail: err.message});
+      }
+      return true;
+    }
+
+    // 7. Install / Hot-Load Generated Plugin
+    if (sub === '/install-plugin' && req.method === 'POST') {
+      try {
+        const body = await readBody(req);
+        const {filename, code, pluginId, version, templateHash, activate = true} = body;
+
+        if (!filename || !/^[a-z0-9][a-z0-9._-]{0,63}\.mjs$/i.test(filename)) {
+          send(400, {ok: false, error: 'INVALID_FILENAME', detail: 'Filename must match /^[a-z0-9._-]+\\.mjs$/'});
+          return true;
+        }
+        if (!code || typeof code !== 'string' || code.length < 50) {
+          send(400, {ok: false, error: 'INVALID_CODE', detail: 'Code payload cannot be empty'});
+          return true;
+        }
+        if (!contractsPath || !fs.existsSync(contractsPath)) {
+          send(500, {ok: false, error: 'CONTRACTS_CONFIG_NOT_FOUND'});
+          return true;
+        }
+
+        const contractsDir = path.dirname(path.resolve(contractsPath));
+        const targetFilePath = path.join(contractsDir, filename);
+
+        // Write plugin file safely
+        const tmpFile = targetFilePath + '.tmp-' + Date.now();
+        fs.writeFileSync(tmpFile, code, 'utf8');
+        fs.renameSync(tmpFile, targetFilePath);
+
+        const sha256 = crypto.createHash('sha256').update(code).digest('hex');
+
+        // Update contracts config JSON
+        const rawConfig = JSON.parse(fs.readFileSync(contractsPath, 'utf8'));
+        if (!Array.isArray(rawConfig.contracts)) rawConfig.contracts = [];
+
+        // Check if module already in list
+        const existingIdx = rawConfig.contracts.findIndex(c => c.module === filename || c.module === `./${filename}`);
+        const newEntry = {
+          module: filename,
+          sha256,
+          retired: !activate,
+          options: {
+            id: pluginId || filename.replace(/\.mjs$/, ''),
+            version: version || '1.0.0',
+            templateHash: templateHash || null
+          }
+        };
+
+        if (existingIdx >= 0) {
+          rawConfig.contracts[existingIdx] = newEntry;
+        } else {
+          if (activate) rawConfig.contracts.unshift(newEntry);
+          else rawConfig.contracts.push(newEntry);
+        }
+
+        const tmpConfig = contractsPath + '.tmp-' + Date.now();
+        fs.writeFileSync(tmpConfig, JSON.stringify(rawConfig, null, 2) + '\n', 'utf8');
+        fs.renameSync(tmpConfig, contractsPath);
+
+        // Hot reload contracts into running engine
+        if (engine && sdk) {
+          const newContracts = await loadContracts(contractsPath, {sdk, network});
+          engine.contracts = newContracts;
+          log('PLUGIN_INSTALLED_AND_RELOADED', {filename, sha256, active: activate, plugins: newContracts.describe()});
+        }
+
+        send(200, {
+          ok: true,
+          message: 'Plugin successfully installed and loaded into indexer',
+          filename,
+          sha256,
+          plugins: engine?.contracts ? engine.contracts.describe() : []
+        });
+      } catch (err) {
+        send(500, {ok: false, error: 'PLUGIN_INSTALL_FAILED', detail: err.message});
       }
       return true;
     }

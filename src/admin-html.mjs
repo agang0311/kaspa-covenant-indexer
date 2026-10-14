@@ -853,6 +853,37 @@ input:focus, select:focus, textarea:focus {
   </div>
 </div>
 
+<!-- 插件代码生成与在线安装弹窗 (Phase 3) -->
+<div class="modal-backdrop" id="pluginGenModal" style="display:none;">
+  <div class="modal-box" style="max-width:680px;max-height:90vh;overflow-y:auto;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <div class="section-title">✨ 生成 Covenant 索引器插件</div>
+      <button class="btn btn-sm" onclick="document.getElementById('pluginGenModal').style.display='none'">✕</button>
+    </div>
+    <div class="grid-2col" style="margin-bottom:12px;">
+      <div>
+        <label style="font-size:11.5px;color:var(--muted);display:block;margin-bottom:3px;">插件模块文件名 (.mjs):</label>
+        <input type="text" id="genModuleFile" class="mono" value="counter.mjs">
+      </div>
+      <div>
+        <label style="font-size:11.5px;color:var(--muted);display:block;margin-bottom:3px;">插件 ID (小写短横线):</label>
+        <input type="text" id="genPluginId" class="mono" value="counter">
+      </div>
+    </div>
+    <div style="margin-bottom:14px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+        <label style="font-size:11.5px;color:var(--muted);">生成插件 JavaScript 代码 (ES Module):</label>
+        <button class="btn btn-sm" onclick="copyGenCode()">📋 复制源码</button>
+      </div>
+      <textarea id="genPluginCodeArea" class="mono" style="height:220px;font-size:11.5px;line-height:1.5;background:#050912;" spellcheck="false"></textarea>
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+      <button class="btn btn-pri" id="btnInstallGeneratedPlugin" style="flex:1;justify-content:center;">💾 保存并在线热装载到当前索引器 (Save & Hot-Load)</button>
+      <button class="btn" onclick="document.getElementById('pluginGenModal').style.display='none'">取消</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toastMsg"></div>
 
 <script>
@@ -1318,6 +1349,9 @@ function renderCompileResult(data, box) {
     return;
   }
 
+  window._lastArtifact = data.artifact;
+  window._lastContractName = c.name;
+
   const entriesHtml = (c.entries || []).map(e => '<tr>' +
     '<td class="mono"><b>' + e.key + '</b></td>' +
     '<td><span class="tag tag-active mono">' + e.dispatchTag + '</span></td>' +
@@ -1337,10 +1371,80 @@ function renderCompileResult(data, box) {
       '<div style="padding:12px 14px;font-weight:700;border-bottom:1px solid var(--border);">⚡ 方法入口与调度标签 (Entrypoints & Dispatch Tags)</div>' +
       '<div class="table-wrap"><table><thead><tr><th>方法标识</th><th>Dispatch Tag</th><th>入参</th></tr></thead><tbody>' + entriesHtml + '</tbody></table></div>' +
     '</div>' +
+    '<div class="card" style="border-color:var(--kaspa);background:rgba(112,199,186,0.04);margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">' +
+      '<div>' +
+        '<div style="font-weight:700;font-size:13.5px;color:var(--kaspa);">✨ 自动化 Covenant 插件组装 (Plugin Generator)</div>' +
+        '<div style="font-size:11.5px;color:var(--muted);margin-top:2px;">基于当前编译产物的 ABI 与模版哈希，自动生成标准 Indexer 状态机插件并一键装载。</div>' +
+      '</div>' +
+      '<button class="btn btn-pri btn-sm" onclick="openPluginGeneratorModal()">✨ 一键组装并在线装载插件 →</button>' +
+    '</div>' +
     '<details class="card" style="cursor:pointer;"><summary style="font-weight:600;color:var(--muted);">📦 查看完整编译器 JSON Artifact</summary>' +
       '<pre class="mono" style="margin-top:12px;font-size:11px;overflow:auto;max-height:300px;">' + JSON.stringify(data.artifact, null, 2) + '</pre>' +
     '</details>';
 }
+
+window.openPluginGeneratorModal = async function() {
+  if (!window._lastArtifact) return;
+  const modal = document.getElementById('pluginGenModal');
+  modal.style.display = 'flex';
+  
+  const cName = window._lastContractName || Object.keys(window._lastArtifact.contracts || {})[0];
+  const pId = (cName || 'contract').toLowerCase();
+  document.getElementById('genModuleFile').value = pId + '.mjs';
+  document.getElementById('genPluginId').value = pId;
+
+  try {
+    const res = await api('/generate-plugin', 'POST', {
+      artifact: window._lastArtifact,
+      contractName: cName,
+      pluginId: pId
+    });
+    if (res.ok) {
+      document.getElementById('genPluginCodeArea').value = res.code;
+      window._generatedTemplateHash = res.templateHashHex;
+    }
+  } catch (err) {
+    showToast('生成插件失败: ' + err.message, 'var(--rose)');
+  }
+};
+
+window.copyGenCode = function() {
+  const code = document.getElementById('genPluginCodeArea').value;
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(code);
+    showToast('已复制插件源代码！', 'var(--emerald)');
+  }
+};
+
+document.getElementById('btnInstallGeneratedPlugin').onclick = async function() {
+  const filename = document.getElementById('genModuleFile').value.trim();
+  const pluginId = document.getElementById('genPluginId').value.trim();
+  const code = document.getElementById('genPluginCodeArea').value;
+  const btn = this;
+  btn.disabled = true;
+  btn.innerText = '正在保存并热装载...';
+
+  try {
+    const res = await api('/install-plugin', 'POST', {
+      filename,
+      pluginId,
+      code,
+      templateHash: window._generatedTemplateHash || null,
+      activate: true
+    });
+    if (res.ok) {
+      document.getElementById('pluginGenModal').style.display = 'none';
+      showToast('🎉 插件已成功安装并热加载！', 'var(--emerald)');
+      await refreshAll();
+      document.querySelector('[data-tab="tab-plugins"]').click();
+    }
+  } catch (err) {
+    showToast('装载插件失败: ' + err.message, 'var(--rose)');
+  } finally {
+    btn.disabled = false;
+    btn.innerText = '💾 保存并在线热装载到当前索引器 (Save & Hot-Load)';
+  }
+};
 
 const btnAst = document.getElementById('btnAstOnly');
 if (btnAst) btnAst.onclick = () => runCompilation(true);
