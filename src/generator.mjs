@@ -159,13 +159,37 @@ export async function create(options = {}, context = {}) {
     const covenantId = output.covenant?.covenantId || txid;
     const spk = output.scriptPublicKey;
 
-    const initialRoundState = {
+    let initialRoundState = {
       phase: 1,
       contractName: CONTRACT_NAME,
       templateHash: targetTemplateHash,
       step: 0,
       genesisDaa: block?.daa || null
     };
+
+    // If script contains 80-byte ledger, decode the structured state
+    const scriptHex = typeof spk === 'string' ? spk : (spk?.script || '');
+    if (scriptHex && STATE_OFFSET >= 0 && STATE_LEN >= 80) {
+      try {
+        const rawBytes = Buffer.from(scriptHex, 'hex').slice(STATE_OFFSET, STATE_OFFSET + STATE_LEN);
+        const magic = rawBytes.slice(0, 4).toString('ascii');
+        if (magic === 'KW21' || magic === 'KW20') {
+          initialRoundState = {
+            ...initialRoundState,
+            phase: rawBytes.readInt32LE(4),
+            ticketPrice: rawBytes.readBigInt64LE(8).toString(),
+            ticketCap: rawBytes.readInt32LE(16),
+            purchaseCap: rawBytes.readInt32LE(20),
+            minTickets: rawBytes.readInt32LE(24),
+            closeEligibleDaa: rawBytes.readBigInt64LE(28).toString(),
+            sold: rawBytes.readInt32LE(36),
+            purchaseCount: rawBytes.readInt32LE(40),
+            cursor: rawBytes.readInt32LE(44),
+            ownerKey: rawBytes.slice(48, 80).toString('hex')
+          };
+        }
+      } catch {}
+    }
 
     // Verify Initial State Guards if specified
     if (stateGuards && typeof stateGuards === 'object') {

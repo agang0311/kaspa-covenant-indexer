@@ -934,9 +934,9 @@ input:focus, select:focus, textarea:focus {
       <textarea id="genPluginCodeArea" class="mono" style="height:200px;font-size:11.5px;line-height:1.5;background:#050912;" spellcheck="false"></textarea>
     </div>
 
-    <div style="display:flex;gap:10px;flex-wrap:wrap;">
-      <button class="btn btn-pri" id="btnInstallGeneratedPlugin" style="flex:1;justify-content:center;">💾 保存并在线热装载到当前索引器 (Save & Hot-Load)</button>
-      <button class="btn" onclick="document.getElementById('pluginGenModal').style.display='none'">取消</button>
+    <div style="display:flex;gap:10px;width:100%;box-sizing:border-box;">
+      <button class="btn btn-pri" id="btnInstallGeneratedPlugin" style="flex:2;justify-content:center;height:40px;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">💾 保存并热装载</button>
+      <button class="btn" style="flex:1;justify-content:center;height:40px;font-size:13px;" onclick="document.getElementById('pluginGenModal').style.display='none'">取消</button>
     </div>
   </div>
 </div>
@@ -1364,6 +1364,7 @@ async function runCompilation(astOnly) {
   if (ctorRaw) {
     try {
       constructorArgs = JSON.parse(ctorRaw);
+      window._lastConstructorArgs = constructorArgs;
     } catch (err) {
       box.innerHTML = '<div class="card" style="border-color:var(--rose);color:var(--rose);">构造函数参数不是合法的 JSON 格式: ' + err.message + '</div>';
       return;
@@ -1455,6 +1456,37 @@ function renderCompileResult(data, box) {
     '</details>';
 }
 
+function decodeLedgerFromArgs(args) {
+  if (!Array.isArray(args) || !args.length) return null;
+  for (const item of args) {
+    const val = item?.value || (Array.isArray(item) ? item : null);
+    if (Array.isArray(val) && val.length >= 80) {
+      const magic = String.fromCharCode(...val.slice(0, 4));
+      if (magic === 'KW21' || magic === 'KW20') {
+        const u = (a, w) => {
+          let n = 0n;
+          for (let i = 0; i < w; i++) n |= BigInt(val[a + i]) << BigInt(i * 8);
+          return n;
+        };
+        const num = (a) => Number(u(a, 4));
+        return {
+          phase: num(4),
+          ticketPrice: u(8, 8).toString(),
+          ticketCap: num(16),
+          purchaseCap: num(20),
+          minTickets: num(24),
+          closeEligibleDaa: u(28, 8).toString(),
+          sold: num(36),
+          purchaseCount: num(40),
+          cursor: num(44),
+          ownerKey: Array.from(val.slice(48, 80)).map(b => b.toString(16).padStart(2, '0')).join('')
+        };
+      }
+    }
+  }
+  return null;
+}
+
 window.openPluginGeneratorModal = async function() {
   if (!window._lastArtifact) return;
   const modal = document.getElementById('pluginGenModal');
@@ -1466,33 +1498,74 @@ window.openPluginGeneratorModal = async function() {
   document.getElementById('genModuleFile').value = pId + '.mjs';
   document.getElementById('genPluginId').value = pId;
 
-  // Extract fields automatically from the compiled contract artifact
-  const fields = cData?.runtime_state?.fields || [];
   const listEl = document.getElementById('genDynamicFieldsList');
   if (listEl) {
-    if (!fields.length) {
-      listEl.innerHTML = '<div style="color:var(--muted);font-size:11.5px;padding:6px 10px;background:rgba(0,0,0,0.2);border-radius:4px;">未检测到独立状态变量（无状态 Stateless 契约）</div>';
-    } else {
-      listEl.innerHTML = fields.map(f => {
-        const typeKind = typeof f.type === 'object' ? (f.type.kind || 'int') : (f.type || 'int');
-        let defVal = '0';
-        if (typeKind === 'bool') defVal = 'false';
-        if (typeKind === 'bytes' || typeKind === 'fixed_bytes') defVal = '';
-        if (f.name === 'phase') defVal = '1';
+    // 1. Check if this is a Kaswin 80-byte compound ledger
+    const decodedLedger = decodeLedgerFromArgs(window._lastConstructorArgs);
+    if (decodedLedger) {
+      // Auto-prefill deposit to 4 TKAS if empty
+      const depInput = document.getElementById('genReqDeposit');
+      if (depInput && !depInput.value.trim()) depInput.value = '400000000';
+      // Auto-prefill official registry if empty
+      const regInput = document.getElementById('genRegistryAddr');
+      if (regInput && !regInput.value.trim()) regInput.value = 'kaspatest:qztrjpfpuf6g9jw76e6ay909z43hndpv5maqkker6ur4enz7llarsh82ezggl';
 
-        const isChecked = defVal !== '';
+      const kaswinParams = [
+        { name: 'phase', type: 'int', val: decodedLedger.phase, desc: '阶段 (创世必须为 1 · OPEN)', checked: true },
+        { name: 'sold', type: 'int', val: decodedLedger.sold, desc: '已售张数 (创世必须为 0)', checked: true },
+        { name: 'purchaseCount', type: 'int', val: decodedLedger.purchaseCount, desc: '记录数 (创世必须为 0)', checked: true },
+        { name: 'cursor', type: 'int', val: decodedLedger.cursor, desc: '退款游标 (创世必须为 0)', checked: true },
+        { name: 'ticketPrice', type: 'sompi', val: decodedLedger.ticketPrice, desc: '单张票价 (sompi)', checked: true },
+        { name: 'ticketCap', type: 'int', val: decodedLedger.ticketCap, desc: '售票上限 (张)', checked: true },
+        { name: 'minTickets', type: 'int', val: decodedLedger.minTickets, desc: '最低起抽票数', checked: true },
+        { name: 'purchaseCap', type: 'int', val: decodedLedger.purchaseCap, desc: '记录容量上限', checked: true },
+        { name: 'closeEligibleDaa', type: 'int', val: decodedLedger.closeEligibleDaa, desc: '封盘 DAA 延时', checked: false },
+        { name: 'ownerKey', type: 'pubkey', val: decodedLedger.ownerKey, desc: '创建者公钥 (选填)', checked: false }
+      ];
+
+      listEl.innerHTML = '<div style="font-size:11.5px;color:var(--kaspa);font-weight:700;margin-bottom:4px;">' +
+        '📦 检测到 80 字节复合状态账本 (Kaswin Ledger)，已智能解构成 10 项业务参数：' +
+      '</div>' + kaswinParams.map(f => {
         return '<div class="field-invariant-row" style="display:flex;align-items:center;gap:8px;background:rgba(0,0,0,0.25);padding:6px 10px;border-radius:var(--radius-sm);border:1px solid var(--border);flex-wrap:wrap;">' +
           '<label style="display:flex;align-items:center;gap:6px;min-width:140px;cursor:pointer;">' +
-            '<input type="checkbox" class="field-guard-toggle" data-name="' + f.name + '" ' + (isChecked ? 'checked' : '') + ' onchange="rebuildPluginCode()">' +
+            '<input type="checkbox" class="field-guard-toggle" data-name="' + f.name + '" ' + (f.checked ? 'checked' : '') + ' onchange="rebuildPluginCode()">' +
             '<strong class="mono" style="color:var(--text);font-size:12px;">' + f.name + '</strong>' +
-            '<span class="tag tag-standby" style="font-size:10px;">' + typeKind + '</span>' +
+            '<span class="tag tag-standby" style="font-size:10px;">' + f.type + '</span>' +
           '</label>' +
           '<div style="flex:1;display:flex;align-items:center;gap:6px;min-width:160px;">' +
-            '<span style="color:var(--muted);font-size:11px;white-space:nowrap;">创世必须等于:</span>' +
-            '<input type="text" class="field-guard-val mono" data-name="' + f.name + '" value="' + defVal + '" style="padding:4px 8px;font-size:12px;height:28px;" placeholder="初始约束值" oninput="rebuildPluginCode()">' +
+            '<span style="color:var(--muted);font-size:11px;white-space:nowrap;">约束值:</span>' +
+            '<input type="text" class="field-guard-val mono" data-name="' + f.name + '" value="' + f.val + '" style="padding:4px 8px;font-size:12px;height:28px;" placeholder="' + f.desc + '" oninput="rebuildPluginCode()">' +
           '</div>' +
         '</div>';
       }).join('');
+
+    } else {
+      // 2. General Contract: extract fields from compiled artifact
+      const fields = cData?.runtime_state?.fields || [];
+      if (!fields.length) {
+        listEl.innerHTML = '<div style="color:var(--muted);font-size:11.5px;padding:6px 10px;background:rgba(0,0,0,0.2);border-radius:4px;">未检测到独立状态变量（无状态 Stateless 契约）</div>';
+      } else {
+        listEl.innerHTML = fields.map(f => {
+          const typeKind = typeof f.type === 'object' ? (f.type.kind || 'int') : (f.type || 'int');
+          let defVal = '0';
+          if (typeKind === 'bool') defVal = 'false';
+          if (typeKind === 'bytes' || typeKind === 'fixed_bytes') defVal = '';
+          if (f.name === 'phase') defVal = '1';
+
+          const isChecked = defVal !== '';
+          return '<div class="field-invariant-row" style="display:flex;align-items:center;gap:8px;background:rgba(0,0,0,0.25);padding:6px 10px;border-radius:var(--radius-sm);border:1px solid var(--border);flex-wrap:wrap;">' +
+            '<label style="display:flex;align-items:center;gap:6px;min-width:140px;cursor:pointer;">' +
+              '<input type="checkbox" class="field-guard-toggle" data-name="' + f.name + '" ' + (isChecked ? 'checked' : '') + ' onchange="rebuildPluginCode()">' +
+              '<strong class="mono" style="color:var(--text);font-size:12px;">' + f.name + '</strong>' +
+              '<span class="tag tag-standby" style="font-size:10px;">' + typeKind + '</span>' +
+            '</label>' +
+            '<div style="flex:1;display:flex;align-items:center;gap:6px;min-width:160px;">' +
+              '<span style="color:var(--muted);font-size:11px;white-space:nowrap;">创世必须等于:</span>' +
+              '<input type="text" class="field-guard-val mono" data-name="' + f.name + '" value="' + defVal + '" style="padding:4px 8px;font-size:12px;height:28px;" placeholder="初始约束值" oninput="rebuildPluginCode()">' +
+            '</div>' +
+          '</div>';
+        }).join('');
+      }
     }
   }
 
