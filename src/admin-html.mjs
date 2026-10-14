@@ -1275,7 +1275,7 @@ async function loadPluginsTab() {
     const cfgList = res.config || [];
 
     tbody.innerHTML = cfgList.map((cfg, idx) => {
-      const p = list.find(x => x.module === cfg.module || x.module === './' + cfg.module) || list[idx] || {};
+      const p = list[idx] || {};
       const regCount = (cfg.options?.registryAddresses?.length) || 0;
       const watchText = regCount ? ('<span class="tag tag-standby">' + regCount + ' 个地址</span>') : '<span style="color:var(--dim);">无监听</span>';
       const keyName = p.key || (cfg.options?.id ? (cfg.options.id + '@' + (cfg.options.version || '1.0.0')) : cfg.module);
@@ -1287,11 +1287,12 @@ async function loadPluginsTab() {
         '<td>' + watchText + '</td>' +
         '<td>' + (cfg.retired ? '<span class="tag tag-retired">RETIRED (兼容)</span>' : '<span class="tag tag-active">ACTIVE (主导)</span>') + '</td>' +
         '<td>' +
-          '<div style="display:flex;gap:6px;">' +
+          '<div style="display:flex;gap:6px;flex-wrap:wrap;">' +
             '<button class="btn btn-sm btn-pri" onclick="openPluginConfigModal(' + idx + ')">⚙️ 配置规则</button>' +
             '<button class="btn btn-sm" onclick="togglePlugin(' + idx + ', ' + (!cfg.retired) + ')">' +
               (cfg.retired ? '🟢 激活' : '⏸️ 退役') +
             '</button>' +
+            '<button class="btn btn-sm" style="color:var(--rose);border-color:rgba(239,68,68,0.3);" onclick="removePlugin(' + idx + ', \\'' + (p.key || cfg.module) + '\\')">🗑️ 卸载</button>' +
           '</div>' +
         '</td>' +
       '</tr>';
@@ -1300,6 +1301,20 @@ async function loadPluginsTab() {
     console.error(err);
   }
 }
+
+window.removePlugin = async function(index, name) {
+  if (!confirm('确认要卸载并移除插件 [' + name + '] 吗？\\n此操作将从索引器清单中注销该插件，停止其对新轮次的监听。')) return;
+  try {
+    const res = await api('/plugins/remove', 'POST', { index });
+    if (res.ok) {
+      showToast('插件 [' + name + '] 已成功卸载！', 'var(--emerald)');
+      await refreshAll();
+      await loadPluginsTab();
+    }
+  } catch (err) {
+    showToast('卸载失败: ' + err.message, 'var(--rose)');
+  }
+};
 
 // Open Configuration Modal for any plugin in Tab 3
 window.openPluginConfigModal = function(idx) {

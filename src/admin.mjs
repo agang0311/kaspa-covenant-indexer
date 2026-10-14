@@ -418,6 +418,58 @@ export async function handleAdmin(req, res, ctx) {
       return true;
     }
 
+    // 4c. Remove / Uninstall Plugin
+    if (sub === '/plugins/remove' && req.method === 'POST') {
+      try {
+        const body = await readBody(req);
+        const {index} = body;
+        if (!contractsPath || !fs.existsSync(contractsPath)) {
+          send(500, {ok: false, error: 'CONTRACTS_FILE_NOT_FOUND'});
+          return true;
+        }
+
+        const raw = JSON.parse(fs.readFileSync(contractsPath, 'utf8'));
+        if (!Array.isArray(raw.contracts) || !raw.contracts[index]) {
+          send(400, {ok: false, error: 'INVALID_PLUGIN_INDEX'});
+          return true;
+        }
+
+        const removedEntry = raw.contracts.splice(index, 1)[0];
+        const tmp = contractsPath + '.tmp-' + Date.now();
+        fs.writeFileSync(tmp, JSON.stringify(raw, null, 2) + '\n');
+        fs.renameSync(tmp, contractsPath);
+
+        // Delete plugin file if it was a custom file and not builtin
+        const contractsDir = path.dirname(path.resolve(contractsPath));
+        const modFile = path.join(contractsDir, removedEntry.module);
+        try {
+          if (fs.existsSync(modFile) && removedEntry.module.endsWith('.mjs')) {
+            fs.unlinkSync(modFile);
+          }
+        } catch {}
+
+        // Hot reload contracts into running engine
+        if (engine && sdk) {
+          const newContracts = await loadContracts(contractsPath, {sdk, network});
+          engine.contracts = newContracts;
+          log('PLUGIN_REMOVED_AND_RELOADED', {
+            removed: removedEntry.module,
+            remaining: newContracts.describe()
+          });
+        }
+
+        send(200, {
+          ok: true,
+          message: 'Plugin successfully removed and unloaded',
+          plugins: engine?.contracts ? engine.contracts.describe() : [],
+          config: raw.contracts
+        });
+      } catch (err) {
+        send(500, {ok: false, error: err.message});
+      }
+      return true;
+    }
+
     // 5. Compile SilverScript Contract (.sil)
     if (sub === '/compile' && req.method === 'POST') {
       try {
