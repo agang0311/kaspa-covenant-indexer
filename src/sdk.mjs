@@ -36,7 +36,7 @@ export function loadSdk() {
       throw new Error('KASPA_SDK_NOT_FOUND: no local SDK found in sdk/, /opt/kaswin-index/live/sdk, or references/');
     }
   }
-  if (sdk.version() !== '2.0.1') throw new Error(`本服务核验 SDK 2.0.1，实际加载为 ${sdk.version()}`);
+  if (sdk.version() !== '2.1.0') throw new Error(`本服务核验 SDK 2.1.0，实际加载为 ${sdk.version()}`);
   if (typeof globalThis.WebSocket !== 'function') throw new Error('需要 Node.js 22+ 的原生 WebSocket 支持');
   return sdk;
 }
