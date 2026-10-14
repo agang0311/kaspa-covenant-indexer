@@ -5,6 +5,7 @@ import {ADMIN_HTML} from './admin-html.mjs';
 import {categoryOf} from './api.mjs';
 import {loadContracts} from './contracts.mjs';
 import {compileSilverScript} from './compiler.mjs';
+import {TN10_SEED} from './node-pool.mjs';
 
 export function verifyAdminToken(req, expectedToken) {
   if (!expectedToken) return false;
@@ -135,8 +136,124 @@ export async function handleAdmin(req, res, ctx) {
       return true;
     }
 
+    // Node Pool & Candidates API
+    if (sub === '/node-pool' && req.method === 'GET') {
+      const members = typeof node?.status === 'function' ? node.status() : [{url: node?.url ?? node?.identity?.url, up: true, active: true}];
+      send(200, {
+        ok: true,
+        seeds: TN10_SEED,
+        members,
+        active: node?.identity ?? null
+      });
+      return true;
+    }
+
+    if (sub === '/probe-pool' && req.method === 'POST') {
+      try {
+        const body = await readBody(req).catch(() => ({}));
+        const customCandidates = Array.isArray(body?.urls) ? body.urls : [];
+        const targets = [...new Set([
+          ...customCandidates,
+          ...TN10_SEED,
+          ...(typeof node?.status === 'function' ? node.status().map(m => m.url) : [node?.url]).filter(Boolean)
+        ])].filter(u => typeof u === 'string' && /^wss?:\/\//i.test(u));
+
+        const probeSingleTarget = async (url) => {
+          let rpc = null;
+          try {
+            rpc = new sdk.RpcClient({url, networkId: network, encoding: sdk.Encoding.Borsh});
+            const t0 = performance.now();
+            await rpc.connect({blockAsyncConnect: true, strategy: sdk.ConnectStrategy.Fallback, timeoutDuration: 3500});
+            const rttMs = Math.round(performance.now() - t0);
+            const info = await rpc.getServerInfo();
+            let p2pId = null; try { p2pId = (await rpc.getInfo()).p2pId; } catch {}
+            const dag = await rpc.getBlockDagInfo().catch(() => null);
+            await rpc.disconnect();
+            return {
+              url,
+              up: true,
+              rttMs,
+              p2pId,
+              serverVersion: info.serverVersion || null,
+              isSynced: Boolean(info.isSynced),
+              hasUtxoIndex: Boolean(info.hasUtxoIndex),
+              virtualDaaScore: info.virtualDaaScore ? info.virtualDaaScore.toString() : null,
+              sink: dag?.sink || null
+            };
+          } catch (err) {
+            if (rpc) { try { await rpc.disconnect(); } catch {} }
+            return {
+              url,
+              up: false,
+              rttMs: null,
+              error: (err?.message || 'CONNECT_FAILED').slice(0, 100)
+            };
+          }
+        };
+
+        const probeWithDeadline = (url) => {
+          let timer;
+          const deadline = new Promise(resolve => {
+            timer = setTimeout(() => resolve({url, up: false, rttMs: null, error: 'PROBE_TIMEOUT'}), 4500);
+            timer.unref?.();
+          });
+          return Promise.race([probeSingleTarget(url), deadline]).finally(() => clearTimeout(timer));
+        };
+
+        const results = await Promise.all(targets.map(probeWithDeadline));
+
+        let maxDaa = 0n;
+        for (const r of results) {
+          if (r.up && r.virtualDaaScore) {
+            try {
+              const v = BigInt(r.virtualDaaScore);
+              if (v > maxDaa) maxDaa = v;
+            } catch {}
+          }
+        }
+
+        const p2pCount = {};
+        for (const r of results) {
+          if (r.up && r.p2pId) p2pCount[r.p2pId] = (p2pCount[r.p2pId] || 0) + 1;
+        }
+
+        for (const r of results) {
+          if (r.up) {
+            r.sharedBackend = r.p2pId ? (p2pCount[r.p2pId] > 1) : false;
+            if (r.virtualDaaScore) {
+              try {
+                const diff = maxDaa - BigInt(r.virtualDaaScore);
+                r.lag = diff > 0n ? diff.toString() : '0';
+              } catch {
+                r.lag = '0';
+              }
+            } else {
+              r.lag = '0';
+            }
+          }
+        }
+
+        // Sort: online first, then lowest RTT
+        results.sort((a, b) => {
+          if (a.up !== b.up) return a.up ? -1 : 1;
+          if (a.up && b.up) return (a.rttMs || 9999) - (b.rttMs || 9999);
+          return a.url.localeCompare(b.url);
+        });
+
+        send(200, {
+          ok: true,
+          candidates: results,
+          maxDaa: maxDaa.toString()
+        });
+      } catch (err) {
+        send(500, {ok: false, error: err.message});
+      }
+      return true;
+    }
+
     // 2. Test Node Connectivity
     if (sub === '/test-node' && req.method === 'POST') {
+      let rpc = null, timer = null;
       try {
         const body = await readBody(req);
         const testUrl = body?.url?.trim();
@@ -145,18 +262,31 @@ export async function handleAdmin(req, res, ctx) {
           return true;
         }
 
-        const rpc = new sdk.RpcClient({url: testUrl, networkId: network, encoding: sdk.Encoding.Borsh});
-        const startT = performance.now();
-        await rpc.connect({blockAsyncConnect: true, strategy: sdk.ConnectStrategy.Fallback, timeoutDuration: 6000});
-        const rttMs = Math.round(performance.now() - startT);
-        const info = await rpc.getServerInfo();
-        const dag = await rpc.getBlockDagInfo();
+        rpc = new sdk.RpcClient({url: testUrl, networkId: network, encoding: sdk.Encoding.Borsh});
+        const timeoutPromise = new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error('CONNECT_TIMEOUT (5s)')), 5000);
+          timer.unref?.();
+        });
+
+        const connectTask = async () => {
+          const startT = performance.now();
+          await rpc.connect({blockAsyncConnect: true, strategy: sdk.ConnectStrategy.Fallback, timeoutDuration: 4000});
+          const rttMs = Math.round(performance.now() - startT);
+          const info = await rpc.getServerInfo();
+          let p2pId = null; try { p2pId = (await rpc.getInfo()).p2pId; } catch {}
+          const dag = await rpc.getBlockDagInfo().catch(() => null);
+          return {rttMs, info, p2pId, dag};
+        };
+
+        const {rttMs, info, p2pId, dag} = await Promise.race([connectTask(), timeoutPromise]);
+        clearTimeout(timer);
         await rpc.disconnect();
 
         send(200, {
           ok: true,
           rttMs,
           info: {
+            p2pId,
             serverVersion: info.serverVersion,
             networkId: info.networkId,
             isSynced: info.isSynced,
@@ -164,13 +294,15 @@ export async function handleAdmin(req, res, ctx) {
             virtualDaaScore: info.virtualDaaScore?.toString()
           },
           dag: {
-            sink: dag.sink,
-            virtualDaaScore: dag.virtualDaaScore?.toString(),
-            blockCount: dag.blockCount,
-            headerCount: dag.headerCount
+            sink: dag?.sink,
+            virtualDaaScore: dag?.virtualDaaScore?.toString(),
+            blockCount: dag?.blockCount,
+            headerCount: dag?.headerCount
           }
         });
       } catch (err) {
+        if (timer) clearTimeout(timer);
+        if (rpc) { try { await rpc.disconnect(); } catch {} }
         send(200, {ok: false, error: err.message});
       }
       return true;

@@ -140,7 +140,17 @@ export async function openDualNode({open, urls, log = () => {}, reconnectMs = [1
   const dual = {
     get identity() { return active?.node.identity ?? null; },
     get url() { return active?.url ?? null; },
-    status: () => members.map(m => ({url: m.url, up: m.up, active: m === active, attempts: m.attempts, nodeId: m.node?.identity?.nodeId ?? null})),
+    status: () => members.map(m => ({
+      url: m.url,
+      up: m.up,
+      active: m === active,
+      attempts: m.attempts,
+      nodeId: m.node?.identity?.nodeId ?? null,
+      p2pId: m.node?.identity?.p2pId ?? null,
+      serverVersion: m.node?.identity?.serverVersion ?? null,
+      isSynced: m.node?.identity?.isSynced ?? null,
+      hasUtxoIndex: m.node?.identity?.hasUtxoIndex ?? null,
+    })),
     on(kind, fn) { handlers[kind].push(fn); },
     verify: () => onActive('verify', n => n.verify()),
     subscribeUtxosChanged: async addrs => { addrs.forEach(a => subs.add(a)); await both('subscribeUtxosChanged', addrs); },
