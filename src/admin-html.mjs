@@ -1,11 +1,12 @@
 // Embedded single-file Web Dashboard for Kaspa Covenant Indexer (KCI)
-// Design system inspired by Kaswin Gemini: Dark Space canvas, Kaspa Turquoise accents, clean visual hierarchy.
+// Fully responsive across Mobile & Desktop.
+// Design language: Kaswin Dark Space canvas, Kaspa Turquoise accents, clean spacing & touch-friendly controls.
 
 export const ADMIN_HTML = `<!doctype html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Kaspa Covenant Indexer · 控制台</title>
 <style>
 :root {
@@ -48,7 +49,7 @@ body {
 
 /* Header */
 header {
-  background: rgba(13, 21, 36, 0.85);
+  background: rgba(13, 21, 36, 0.9);
   backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--border);
   padding: 12px 24px;
@@ -58,11 +59,13 @@ header {
   position: sticky;
   top: 0;
   z-index: 50;
+  gap: 12px;
 }
 .brand {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
+  flex-shrink: 0;
 }
 .logo-badge {
   background: var(--kaspa-dim);
@@ -85,7 +88,8 @@ header {
 .header-actions {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 .status-pill {
   display: inline-flex;
@@ -98,6 +102,7 @@ header {
   border-radius: 999px;
   font-size: 12px;
   font-weight: 600;
+  white-space: nowrap;
 }
 .status-pill.degraded {
   background: rgba(245, 158, 11, 0.12);
@@ -112,20 +117,47 @@ header {
   box-shadow: 0 0 8px currentColor;
 }
 
-/* Tabs */
-nav.tabs {
-  background: rgba(13, 21, 36, 0.5);
-  border-bottom: 1px solid var(--border);
-  padding: 0 24px;
-  display: flex;
-  gap: 8px;
+@media (max-width: 768px) {
+  header {
+    padding: 10px 14px;
+    flex-wrap: wrap;
+  }
+  .brand-title {
+    font-size: 14px;
+  }
+  .brand-title .brand-sub {
+    display: none;
+  }
+  .header-actions {
+    width: 100%;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .status-pill {
+    padding: 3px 8px;
+    font-size: 11px;
+  }
 }
+
+/* Tabs: smooth horizontal swipe on mobile */
+nav.tabs {
+  background: rgba(13, 21, 36, 0.75);
+  border-bottom: 1px solid var(--border);
+  padding: 0 16px;
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  white-space: nowrap;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+nav.tabs::-webkit-scrollbar { display: none; }
 .tab-btn {
   background: transparent;
   border: none;
   border-bottom: 2px solid transparent;
   color: var(--muted);
-  padding: 12px 14px;
+  padding: 11px 14px;
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
@@ -133,6 +165,8 @@ nav.tabs {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .tab-btn:hover { color: var(--text); }
 .tab-btn.active {
@@ -143,26 +177,42 @@ nav.tabs {
 /* Layout */
 main {
   flex: 1;
-  padding: 24px;
+  padding: 20px;
   max-width: 1320px;
   width: 100%;
   margin: 0 auto;
 }
+@media (max-width: 768px) {
+  main {
+    padding: 12px;
+  }
+}
 .view-panel { display: none; }
 .view-panel.active { display: block; }
 
-/* Grid & Cards */
+/* Grids */
 .grid-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 16px;
-  margin-bottom: 24px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 14px;
+  margin-bottom: 20px;
 }
+.grid-2col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+@media (max-width: 768px) {
+  .grid-cards { grid-template-columns: 1fr; }
+  .grid-2col { grid-template-columns: 1fr; gap: 14px; }
+}
+
 .card {
   background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: 18px 20px;
+  padding: 16px 18px;
   transition: border-color 0.15s;
 }
 .card:hover { border-color: var(--border-light); }
@@ -178,7 +228,7 @@ main {
   align-items: center;
 }
 .card-val {
-  font-size: 22px;
+  font-size: 20px;
   font-weight: 700;
   color: var(--text);
   line-height: 1.2;
@@ -186,7 +236,7 @@ main {
 .card-sub {
   font-size: 12px;
   color: var(--muted);
-  margin-top: 8px;
+  margin-top: 6px;
 }
 
 /* Section Header */
@@ -194,7 +244,9 @@ main {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin: 24px 0 14px;
+  margin: 18px 0 12px;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 .section-title {
   font-size: 15px;
@@ -207,26 +259,52 @@ main {
 .section-desc {
   font-size: 12px;
   color: var(--muted);
-  margin-top: 4px;
+  margin-top: 3px;
+}
+@media (max-width: 768px) {
+  .section-head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .section-head-actions,
+  .section-head > button {
+    width: 100%;
+    justify-content: center;
+  }
 }
 
-/* Tables */
+/* Tables & Wrappers */
+.table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
 table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12.5px;
+  font-size: 12px;
+  min-width: 540px;
+}
+.table-wrap-compact table {
+  min-width: 100%;
 }
 th {
   background: rgba(18, 29, 48, 0.7);
   color: var(--muted);
   font-weight: 600;
   text-align: left;
-  padding: 10px 14px;
+  padding: 10px 12px;
   border-bottom: 1px solid var(--border);
+  white-space: nowrap;
 }
 td {
-  padding: 12px 14px;
+  padding: 10px 12px;
   border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+td.wrap-cell {
+  white-space: normal;
+  word-break: break-all;
 }
 tr:hover td { background: rgba(23, 36, 60, 0.5); }
 
@@ -239,6 +317,7 @@ tr:hover td { background: rgba(23, 36, 60, 0.5); }
   border-radius: 4px;
   font-size: 11px;
   font-weight: 600;
+  white-space: nowrap;
 }
 .tag-active { background: rgba(16, 185, 129, 0.15); color: var(--emerald); border: 1px solid rgba(16, 185, 129, 0.3); }
 .tag-standby { background: rgba(99, 102, 241, 0.15); color: var(--indigo); border: 1px solid rgba(99, 102, 241, 0.3); }
@@ -260,6 +339,7 @@ tr:hover td { background: rgba(23, 36, 60, 0.5); }
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  white-space: nowrap;
 }
 .btn:hover { border-color: var(--kaspa); color: var(--kaspa); background: var(--bg-panel-hover); }
 .btn-pri {
@@ -268,7 +348,7 @@ tr:hover td { background: rgba(23, 36, 60, 0.5); }
   border-color: var(--kaspa);
 }
 .btn-pri:hover { background: #5ebaa9; color: #04100c; }
-.btn-sm { padding: 4px 10px; font-size: 12px; }
+.btn-sm { padding: 4px 10px; font-size: 11.5px; }
 
 /* Inputs */
 input, select, textarea {
@@ -277,7 +357,7 @@ input, select, textarea {
   color: var(--text);
   padding: 8px 12px;
   border-radius: var(--radius-sm);
-  font-size: 13px;
+  font-size: 12.5px;
   width: 100%;
 }
 input:focus, select:focus, textarea:focus {
@@ -290,34 +370,34 @@ input:focus, select:focus, textarea:focus {
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(3, 7, 13, 0.8);
+  background: rgba(3, 7, 13, 0.85);
   backdrop-filter: blur(6px);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 100;
-  padding: 20px;
+  padding: 16px;
 }
 .modal-box {
   background: var(--bg-panel);
   border: 1px solid var(--border-light);
   border-radius: var(--radius-lg);
-  max-width: 480px;
+  max-width: 460px;
   width: 100%;
-  padding: 24px;
+  padding: 22px;
   box-shadow: 0 20px 45px rgba(0, 0, 0, 0.6);
 }
 .toast {
   position: fixed;
-  bottom: 24px;
-  right: 24px;
+  bottom: 20px;
+  right: 20px;
   background: var(--bg-panel-elevated);
   border: 1px solid var(--kaspa);
   color: var(--text);
-  padding: 12px 20px;
+  padding: 10px 18px;
   border-radius: var(--radius-md);
   box-shadow: 0 10px 25px rgba(0,0,0,0.5);
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 600;
   z-index: 200;
   display: none;
@@ -331,13 +411,13 @@ input:focus, select:focus, textarea:focus {
     <span class="logo-badge">KCI</span>
     <div class="brand-title">
       Kaspa Covenant Indexer
-      <span style="font-weight:400;color:var(--muted);font-size:12px;">Studio · TN10</span>
+      <span class="brand-sub" style="font-weight:400;color:var(--muted);font-size:12px;">Studio · TN10</span>
     </div>
   </div>
   <div class="header-actions">
     <div id="headerStatusPill" class="status-pill"><span class="dot"></span>连接中...</div>
-    <button class="btn btn-sm" id="btnRefresh">🔄 刷新</button>
-    <button class="btn btn-sm" id="btnLogout">🔐 令牌鉴权</button>
+    <button class="btn btn-sm" id="btnRefresh" title="刷新状态">🔄 刷新</button>
+    <button class="btn btn-sm" id="btnLogout" title="设置/更换管理员令牌">🔐 令牌鉴权</button>
   </div>
 </header>
 
@@ -355,7 +435,7 @@ input:focus, select:focus, textarea:focus {
     <div class="grid-cards">
       <div class="card">
         <div class="card-label"><span>活跃共识节点</span><span>P2P ID</span></div>
-        <div class="card-val mono" id="statNodeUrl" style="font-size:14px;word-break:break-all;">-</div>
+        <div class="card-val mono" id="statNodeUrl" style="font-size:13.5px;word-break:break-all;">-</div>
         <div class="card-sub" id="statNodeDetails">延迟: - | 状态: -</div>
       </div>
       <div class="card">
@@ -365,55 +445,59 @@ input:focus, select:focus, textarea:focus {
       </div>
       <div class="card">
         <div class="card-label"><span>选定链 DAA & 检查点</span><span>CONSENSUS</span></div>
-        <div class="card-val mono" id="statVirtualDaa" style="font-size:19px;">-</div>
+        <div class="card-val mono" id="statVirtualDaa" style="font-size:18px;">-</div>
         <div class="card-sub" id="statCheckpointTime">最近检查点: -</div>
       </div>
       <div class="card">
         <div class="card-label"><span>系统内存与负载</span><span>PROCESS</span></div>
-        <div class="card-val mono" id="statMemRss" style="font-size:19px;">-</div>
+        <div class="card-val mono" id="statMemRss" style="font-size:18px;">-</div>
         <div class="card-sub" id="statUptime">已运行: -</div>
       </div>
     </div>
 
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px;">
+    <div class="grid-2col">
       <!-- 双节点状态速览 -->
       <div class="card" style="padding:0;overflow:hidden;">
-        <div style="padding:14px 18px;border-bottom:1px solid var(--border);font-weight:700;display:flex;justify-content:space-between;align-items:center;">
+        <div style="padding:12px 16px;border-bottom:1px solid var(--border);font-weight:700;display:flex;justify-content:space-between;align-items:center;">
           <span>🛰️ 双节点热备当前拓扑</span>
           <button class="btn btn-sm" onclick="document.querySelector('[data-tab=\\'tab-nodes\\']').click()">完整节点池 →</button>
         </div>
-        <table>
-          <thead>
-            <tr>
-              <th>节点角色</th>
-              <th>地址 (wRPC)</th>
-              <th>运行状态</th>
-            </tr>
-          </thead>
-          <tbody id="tblOverviewDual">
-            <tr><td colspan="3" style="text-align:center;color:var(--muted);">加载中...</td></tr>
-          </tbody>
-        </table>
+        <div class="table-wrap table-wrap-compact">
+          <table>
+            <thead>
+              <tr>
+                <th>节点角色</th>
+                <th>地址 (wRPC)</th>
+                <th>运行状态</th>
+              </tr>
+            </thead>
+            <tbody id="tblOverviewDual">
+              <tr><td colspan="3" style="text-align:center;color:var(--muted);">加载中...</td></tr>
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <!-- 契约版本分布速览 -->
       <div class="card" style="padding:0;overflow:hidden;">
-        <div style="padding:14px 18px;border-bottom:1px solid var(--border);font-weight:700;display:flex;justify-content:space-between;align-items:center;">
+        <div style="padding:12px 16px;border-bottom:1px solid var(--border);font-weight:700;display:flex;justify-content:space-between;align-items:center;">
           <span>🧩 Covenant 契约版本分布</span>
           <button class="btn btn-sm" onclick="document.querySelector('[data-tab=\\'tab-plugins\\']').click()">插件管理 →</button>
         </div>
-        <table>
-          <thead>
-            <tr>
-              <th>插件标识</th>
-              <th>模式</th>
-              <th>已索引轮次</th>
-            </tr>
-          </thead>
-          <tbody id="tblContractSummary">
-            <tr><td colspan="3" style="text-align:center;color:var(--muted);">加载中...</td></tr>
-          </tbody>
-        </table>
+        <div class="table-wrap table-wrap-compact">
+          <table>
+            <thead>
+              <tr>
+                <th>插件标识</th>
+                <th>模式</th>
+                <th>已索引轮次</th>
+              </tr>
+            </thead>
+            <tbody id="tblContractSummary">
+              <tr><td colspan="3" style="text-align:center;color:var(--muted);">加载中...</td></tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   </section>
@@ -422,7 +506,7 @@ input:focus, select:focus, textarea:focus {
   <section id="tab-nodes" class="view-panel">
     <div class="section-head">
       <div>
-        <div class="section-title">🛰️ Kaspa TN10 节点池矩阵与双节点热备 (Node Pool Matrix)</div>
+        <div class="section-title">🛰️ Kaspa TN10 节点池矩阵与双节点热备</div>
         <div class="section-desc">
           基于双节点热备模型（Primary + Standby，强制互斥 P2P 后端），实现零秒容灾转移与实时选定链重组追踪。
         </div>
@@ -431,61 +515,63 @@ input:focus, select:focus, textarea:focus {
     </div>
 
     <!-- 活跃双节点矩阵卡片 -->
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;">
+    <div class="grid-2col">
       <div class="card" style="border-left:4px solid var(--kaspa);">
         <div class="card-label">
           <span style="color:var(--kaspa);">主连接节点 (Primary · Active)</span>
-          <span class="tag tag-active">QUERY & NOTIFICATIONS</span>
+          <span class="tag tag-active">QUERY & EVENTS</span>
         </div>
-        <div class="mono" id="dualPrimaryUrl" style="font-size:13px;font-weight:700;word-break:break-all;">-</div>
+        <div class="mono" id="dualPrimaryUrl" style="font-size:12.5px;font-weight:700;word-break:break-all;">-</div>
         <div class="card-sub" id="dualPrimarySub">状态: -</div>
       </div>
       <div class="card" style="border-left:4px solid var(--indigo);">
         <div class="card-label">
           <span style="color:var(--indigo);">热备节点 (Standby · Hot Backup)</span>
-          <span class="tag tag-standby">SUBSCRIBED & HEARTBEAT</span>
+          <span class="tag tag-standby">SUBSCRIBED</span>
         </div>
-        <div class="mono" id="dualStandbyUrl" style="font-size:13px;font-weight:700;word-break:break-all;">-</div>
+        <div class="mono" id="dualStandbyUrl" style="font-size:12.5px;font-weight:700;word-break:break-all;">-</div>
         <div class="card-sub" id="dualStandbySub">状态: -</div>
       </div>
     </div>
 
     <!-- 候选节点池列表 -->
-    <div class="card" style="padding:0;overflow:hidden;margin-bottom:24px;">
-      <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
-        <span style="font-weight:700;">🌐 候选节点池健康矩阵 (TN10 Seeds & Pool Candidates)</span>
-        <span style="color:var(--muted);font-size:12px;">注：共享同一 P2P ID 的节点将被标出，避免将同一后端配为双节点互备</span>
+    <div class="card" style="padding:0;overflow:hidden;margin-bottom:20px;">
+      <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;">
+        <span style="font-weight:700;">🌐 候选节点池健康矩阵 (TN10 Seeds & Pool)</span>
+        <span style="color:var(--muted);font-size:11.5px;">注：标记【共享后端】的节点属于同一实例，不可互为双备</span>
       </div>
-      <table>
-        <thead>
-          <tr>
-            <th>候选节点地址</th>
-            <th>往返延迟 RTT</th>
-            <th>落后块数 (Lag)</th>
-            <th>同步与 UTXO 状态</th>
-            <th>P2P 后端标识</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody id="tblCandidatePool">
-          <tr><td colspan="6" style="text-align:center;color:var(--muted);">点击上方【一键测速候选节点池】进行网络体检</td></tr>
-        </tbody>
-      </table>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>候选节点地址</th>
+              <th>往返延迟 RTT</th>
+              <th>落后块数 (Lag)</th>
+              <th>同步与 UTXO 状态</th>
+              <th>P2P 后端标识</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="tblCandidatePool">
+            <tr><td colspan="6" style="text-align:center;color:var(--muted);">点击上方【一键测速候选节点池】进行网络体检</td></tr>
+          </tbody>
+        </table>
+      </div>
     </div>
 
     <!-- 自定义节点体检与测试 -->
     <div class="card">
-      <div class="section-title" style="margin-bottom:8px;">🔍 自定义节点连通性探测 (Endpoint Probe)</div>
-      <div class="section-desc" style="margin-bottom:14px;">
+      <div class="section-title" style="margin-bottom:6px;">🔍 自定义节点连通性探测 (Endpoint Probe)</div>
+      <div class="section-desc" style="margin-bottom:12px;">
         输入任意自定义 Kaspa wRPC 节点（支持 ws:// 或 wss://，需开放 Borsh 端口），即时探测网络、延迟与 DAG Sink 状态：
       </div>
-      <div style="display:flex;gap:10px;margin-bottom:10px;">
-        <input type="text" id="inputProbeUrl" class="mono" placeholder="ws://127.0.0.1:17210 或 wss://..." value="wss://quark-10.kaspa.red/kaspa/testnet-10/wrpc/borsh">
-        <button class="btn" id="btnProbeNode" style="white-space:nowrap;">🚀 测速与体检</button>
+      <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+        <input type="text" id="inputProbeUrl" class="mono" placeholder="ws://127.0.0.1:17210 或 wss://..." value="wss://quark-10.kaspa.red/kaspa/testnet-10/wrpc/borsh" style="flex:1;min-width:240px;">
+        <button class="btn btn-sm" id="btnProbeNode" style="white-space:nowrap;">🚀 测速与体检</button>
       </div>
       <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:11px;color:var(--muted);">
         <span>快捷测试:</span>
-        <button class="btn btn-sm" type="button" onclick="probeSingle('ws://127.0.0.1:17210')">本地 .201 (ws://127.0.0.1:17210)</button>
+        <button class="btn btn-sm" type="button" onclick="probeSingle('ws://127.0.0.1:17210')">本地 .201 (17210)</button>
         <button class="btn btn-sm" type="button" onclick="probeSingle('wss://vector-10.kaspa.green/kaspa/testnet-10/wrpc/borsh')">vector-10</button>
         <button class="btn btn-sm" type="button" onclick="probeSingle('wss://quark-10.kaspa.red/kaspa/testnet-10/wrpc/borsh')">quark-10</button>
         <button class="btn btn-sm" type="button" onclick="probeSingle('wss://muon-10.kaspa.blue/kaspa/testnet-10/wrpc/borsh')">muon-10</button>
@@ -504,21 +590,23 @@ input:focus, select:focus, textarea:focus {
       <button class="btn btn-sm" id="btnReloadPlugins">🔄 刷新列表</button>
     </div>
 
-    <div class="card" style="padding:0;overflow:hidden;margin-bottom:24px;">
-      <table>
-        <thead>
-          <tr>
-            <th>契约标识</th>
-            <th>模块源文件</th>
-            <th>Profile 指纹 (SHA256)</th>
-            <th>当前角色</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody id="tblPluginList">
-          <tr><td colspan="5" style="text-align:center;color:var(--muted);">加载中...</td></tr>
-        </tbody>
-      </table>
+    <div class="card" style="padding:0;overflow:hidden;margin-bottom:20px;">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>契约标识</th>
+              <th>模块源文件</th>
+              <th>Profile 指纹 (SHA256)</th>
+              <th>当前角色</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="tblPluginList">
+            <tr><td colspan="5" style="text-align:center;color:var(--muted);">加载中...</td></tr>
+          </tbody>
+        </table>
+      </div>
     </div>
   </section>
 
@@ -531,17 +619,17 @@ input:focus, select:focus, textarea:focus {
           在线编写、语法分析并编译 SilverScript 契约，自动抽取状态字段、方法调度标签（Dispatch Tag）与 32 字节模版哈希。
         </div>
       </div>
-      <div style="display:flex;gap:8px;">
+      <div class="section-head-actions" style="display:flex;gap:8px;">
         <input type="file" id="fileUploadSil" accept=".sil" style="display:none;">
-        <button class="btn btn-sm" id="btnUploadSil">📂 载入本地 .sil</button>
+        <button class="btn btn-sm" id="btnUploadSil" style="width:100%;">📂 载入本地 .sil</button>
       </div>
     </div>
 
     <div class="card" style="margin-bottom:20px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-        <div style="display:flex;align-items:center;gap:10px;">
-          <label style="color:var(--muted);font-size:12px;font-weight:600;">契约预设模版:</label>
-          <select id="selectContractPreset" style="width:260px;padding:5px 8px;font-size:12px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex:1;">
+          <label style="color:var(--muted);font-size:12px;font-weight:600;white-space:nowrap;">预设模版:</label>
+          <select id="selectContractPreset" style="max-width:320px;padding:5px 8px;font-size:12px;">
             <option value="counter">计数器合约 (Counter.sil · 单例状态机)</option>
             <option value="empty">空白契约模版 (Custom.sil)</option>
           </select>
@@ -549,20 +637,20 @@ input:focus, select:focus, textarea:focus {
         <span class="tag tag-active" style="font-size:11px;">silverc v0.1.0 就绪</span>
       </div>
 
-      <div style="margin-bottom:14px;">
-        <textarea id="silEditor" class="mono" style="height:210px;font-size:12.5px;line-height:1.6;" spellcheck="false"></textarea>
+      <div style="margin-bottom:12px;">
+        <textarea id="silEditor" class="mono" style="height:200px;font-size:12px;line-height:1.6;" spellcheck="false"></textarea>
       </div>
 
-      <div style="display:grid;grid-template-columns:1fr auto;gap:14px;align-items:flex-end;">
+      <div style="display:grid;grid-template-columns:1fr auto;gap:12px;align-items:flex-end;">
         <div>
-          <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px;">
+          <label style="display:block;font-size:11.5px;color:var(--muted);margin-bottom:4px;">
             构造函数参数 (JSON 数组，如 <code>[0]</code> 或 <code>[]</code>):
           </label>
           <input type="text" id="inputCtorArgs" class="mono" value="[0]">
         </div>
         <div style="display:flex;gap:8px;">
-          <button class="btn" id="btnAstOnly">🔍 语法解析 (AST)</button>
-          <button class="btn btn-pri" id="btnCompileSil">⚡ 执行编译 (Compile)</button>
+          <button class="btn btn-sm" id="btnAstOnly">🔍 语法解析 (AST)</button>
+          <button class="btn btn-pri btn-sm" id="btnCompileSil">⚡ 执行编译 (Compile)</button>
         </div>
       </div>
     </div>
@@ -579,18 +667,20 @@ input:focus, select:focus, textarea:focus {
       </div>
     </div>
     <div class="card" style="padding:0;overflow:hidden;">
-      <table>
-        <thead>
-          <tr>
-            <th>发生时间</th>
-            <th>事件类别</th>
-            <th>详细上下文</th>
-          </tr>
-        </thead>
-        <tbody id="tblJournal">
-          <tr><td colspan="3" style="text-align:center;color:var(--muted);">加载中...</td></tr>
-        </tbody>
-      </table>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>发生时间</th>
+              <th>事件类别</th>
+              <th>详细上下文</th>
+            </tr>
+          </thead>
+          <tbody id="tblJournal">
+            <tr><td colspan="3" style="text-align:center;color:var(--muted);">加载中...</td></tr>
+          </tbody>
+        </table>
+      </div>
     </div>
   </section>
 </main>
@@ -598,8 +688,8 @@ input:focus, select:focus, textarea:focus {
 <!-- 身份鉴权弹窗 -->
 <div class="modal-backdrop" id="authModal" style="display:none;">
   <div class="modal-box">
-    <div class="section-title" style="margin-bottom:12px;">🔐 管理员身份验证</div>
-    <div class="section-desc" style="margin-bottom:20px;">
+    <div class="section-title" style="margin-bottom:10px;">🔐 管理员身份验证</div>
+    <div class="section-desc" style="margin-bottom:16px;">
       当前控制台接口受管理员令牌保护。请输入服务配置的 <code>ADMIN_TOKEN</code>：
     </div>
     <form id="authForm">
@@ -742,7 +832,7 @@ async function refreshAll() {
       jTbody.innerHTML = logs.map(l => '<tr>' +
         '<td style="white-space:nowrap;color:var(--muted);">' + new Date(l.at).toLocaleTimeString() + '</td>' +
         '<td><span class="mono" style="font-weight:700;color:var(--kaspa);">' + l.kind + '</span></td>' +
-        '<td class="mono" style="font-size:12px;word-break:break-all;">' + (typeof l.detail === 'object' ? JSON.stringify(l.detail) : l.detail) + '</td>' +
+        '<td class="mono wrap-cell" style="font-size:11.5px;">' + (typeof l.detail === 'object' ? JSON.stringify(l.detail) : l.detail) + '</td>' +
       '</tr>').join('');
     }
 
@@ -835,10 +925,10 @@ document.getElementById('btnProbeNode').onclick = async () => {
         '<strong style="color:var(--emerald);">✓ 节点连接成功</strong>' +
         '<span class="mono" style="color:var(--kaspa);font-weight:700;">' + r.rttMs + ' ms 往返延迟</span>' +
       '</div>' +
-      '<div style="font-size:12.5px;line-height:1.7;">' +
+      '<div style="font-size:12px;line-height:1.7;">' +
         '网络: <b class="mono">' + r.info?.networkId + '</b> · 服务端版本: <b class="mono">' + r.info?.serverVersion + '</b><br>' +
         '同步状态: <b>' + (r.info?.isSynced ? '🟢 已同步 (Synced)' : '🟡 追块中 (Catching-up)') + '</b> · UTXO 索引: <b>' + (r.info?.hasUtxoIndex ? '已开启' : '未开启') + '</b><br>' +
-        '链尖 DAA: <b class="mono">' + (r.info?.virtualDaaScore || '-') + '</b> · 当前 Sink 块: <span class="mono" style="font-size:11px;color:var(--muted);">' + r.dag?.sink + '</span>' +
+        '链尖 DAA: <b class="mono">' + (r.info?.virtualDaaScore || '-') + '</b> · 当前 Sink 块: <span class="mono" style="font-size:11px;color:var(--muted);word-break:break-all;">' + r.dag?.sink + '</span>' +
       '</div>' +
     '</div>';
   } catch (err) {
@@ -982,14 +1072,14 @@ function renderAstResult(data, box) {
       '<div class="card"><div class="card-label">状态字段数</div><div class="card-val mono">' + (data.fields ? data.fields.length : 0) + '</div></div>' +
       '<div class="card"><div class="card-label">方法入口数</div><div class="card-val mono">' + (data.functions ? data.functions.length : 0) + '</div></div>' +
     '</div>' +
-    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">' +
+    '<div class="grid-2col">' +
       '<div class="card" style="padding:0;overflow:hidden;">' +
         '<div style="padding:12px 14px;font-weight:700;border-bottom:1px solid var(--border);">📊 状态变量声明 (State Fields)</div>' +
-        '<table><thead><tr><th>字段名</th><th>类型</th></tr></thead><tbody>' + fields + '</tbody></table>' +
+        '<div class="table-wrap table-wrap-compact"><table><thead><tr><th>字段名</th><th>类型</th></tr></thead><tbody>' + fields + '</tbody></table></div>' +
       '</div>' +
       '<div class="card" style="padding:0;overflow:hidden;">' +
         '<div style="padding:12px 14px;font-weight:700;border-bottom:1px solid var(--border);">⚡ 方法声明 (Functions)</div>' +
-        '<table><thead><tr><th>方法名</th><th>参数签名</th></tr></thead><tbody>' + functions + '</tbody></table>' +
+        '<div class="table-wrap table-wrap-compact"><table><thead><tr><th>方法名</th><th>参数签名</th></tr></thead><tbody>' + functions + '</tbody></table></div>' +
       '</div>' +
     '</div>';
 }
@@ -1009,16 +1099,16 @@ function renderCompileResult(data, box) {
 
   box.innerHTML = '<div class="section-title" style="margin-bottom:12px;">🎉 契约编译成功 (SilverScript Artifact)</div>' +
     '<div class="card" style="border-color:var(--kaspa);background:rgba(112,199,186,0.06);margin-bottom:16px;">' +
-      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:6px;">' +
         '<div class="card-label" style="color:var(--kaspa);font-weight:700;margin:0;">模版哈希 (Template Hash · 32-Byte)</div>' +
         '<button class="btn btn-sm" data-hash="' + c.templateHashHex + '" onclick="window.copyTemplateHash(this)">📋 复制哈希</button>' +
       '</div>' +
-      '<div class="mono" style="font-size:15px;color:var(--text);word-break:break-all;font-weight:600;">' + c.templateHashHex + '</div>' +
-      '<div style="font-size:12px;color:var(--muted);margin-top:6px;">字节码大小: ' + c.bytecodeLength + ' 字节 | 状态切片偏移: ' + c.stateSpan.offset + ' (长度 ' + c.stateSpan.len + ')</div>' +
+      '<div class="mono" style="font-size:14px;color:var(--text);word-break:break-all;font-weight:600;">' + c.templateHashHex + '</div>' +
+      '<div style="font-size:11.5px;color:var(--muted);margin-top:6px;">字节码大小: ' + c.bytecodeLength + ' 字节 | 状态切片偏移: ' + c.stateSpan.offset + ' (长度 ' + c.stateSpan.len + ')</div>' +
     '</div>' +
     '<div class="card" style="padding:0;overflow:hidden;margin-bottom:16px;">' +
       '<div style="padding:12px 14px;font-weight:700;border-bottom:1px solid var(--border);">⚡ 方法入口与调度标签 (Entrypoints & Dispatch Tags)</div>' +
-      '<table><thead><tr><th>方法标识</th><th>Dispatch Tag</th><th>入参</th></tr></thead><tbody>' + entriesHtml + '</tbody></table>' +
+      '<div class="table-wrap"><table><thead><tr><th>方法标识</th><th>Dispatch Tag</th><th>入参</th></tr></thead><tbody>' + entriesHtml + '</tbody></table></div>' +
     '</div>' +
     '<details class="card" style="cursor:pointer;"><summary style="font-weight:600;color:var(--muted);">📦 查看完整编译器 JSON Artifact</summary>' +
       '<pre class="mono" style="margin-top:12px;font-size:11px;overflow:auto;max-height:300px;">' + JSON.stringify(data.artifact, null, 2) + '</pre>' +
