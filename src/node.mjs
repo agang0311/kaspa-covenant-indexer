@@ -59,7 +59,17 @@ async function verifyNode(rpc, network) {
   if (info.isSynced !== true) throw Error('NODE_NOT_SYNCED');
   if (info.hasUtxoIndex !== true) throw Error('NODE_WITHOUT_UTXOINDEX');   // subscribeUtxosChanged/getUtxosByAddresses need it
   let p2pId = null; try { p2pId = (await rpc.getInfo()).p2pId; } catch {}
-  return {url: rpc.url ?? null, nodeId: rpc.nodeId ?? null, p2pId, serverVersion: info.serverVersion, networkId: info.networkId, checkedAt: new Date().toISOString()};
+  return {
+    url: rpc.url ?? null,
+    nodeId: rpc.nodeId ?? null,
+    p2pId,
+    serverVersion: info.serverVersion,
+    networkId: info.networkId,
+    isSynced: true,
+    hasUtxoIndex: true,
+    virtualDaaScore: info.virtualDaaScore ? info.virtualDaaScore.toString() : null,
+    checkedAt: new Date().toISOString()
+  };
 }
 
 export function addressOfFactory(sdk, network) {

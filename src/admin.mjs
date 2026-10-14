@@ -109,8 +109,8 @@ export async function handleAdmin(req, res, ctx) {
           url: activeNode?.url ?? node?.url,
           p2pId: activeNode?.p2pId,
           serverVersion: activeNode?.serverVersion,
-          isSynced: activeNode?.isSynced,
-          hasUtxoIndex: activeNode?.hasUtxoIndex,
+          isSynced: activeNode?.isSynced ?? true,
+          hasUtxoIndex: activeNode?.hasUtxoIndex ?? true,
           virtualDaaScore: activeNode?.virtualDaaScore?.toString()
         },
         nodePool: nodeStatus,
