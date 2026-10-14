@@ -909,9 +909,16 @@ input:focus, select:focus, textarea:focus {
           <input type="text" id="genAllowedCreators" class="mono" style="font-size:11.5px;" placeholder="留空允许任何人创世">
         </div>
       </div>
-      <div>
-        <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:2px;">初始状态字段断言 JSON (Initial State Guards):</label>
-        <input type="text" id="genStateGuards" class="mono" style="font-size:11.5px;" value='{"step": 0}' placeholder='如 {"step": 0} 或 {"phase": 1, "sold": 0}'>
+      <div style="margin-top:8px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;flex-wrap:wrap;gap:4px;">
+          <label style="font-size:11px;color:var(--text);font-weight:700;">
+            从编译合约提取的状态参数列表 (勾选并设置创世必须满足的严格约束):
+          </label>
+          <button class="btn btn-sm" type="button" onclick="addCustomStateGuardRow()">+ 添加自定义字段</button>
+        </div>
+        <div id="genDynamicFieldsList" style="display:flex;flex-direction:column;gap:6px;">
+          <!-- 动态从编译产物中自动填充 -->
+        </div>
       </div>
     </div>
 
@@ -1454,11 +1461,65 @@ window.openPluginGeneratorModal = async function() {
   modal.style.display = 'flex';
   
   const cName = window._lastContractName || Object.keys(window._lastArtifact.contracts || {})[0];
+  const cData = window._lastArtifact.contracts && window._lastArtifact.contracts[cName];
   const pId = (cName || 'contract').toLowerCase();
   document.getElementById('genModuleFile').value = pId + '.mjs';
   document.getElementById('genPluginId').value = pId;
 
+  // Extract fields automatically from the compiled contract artifact
+  const fields = cData?.runtime_state?.fields || [];
+  const listEl = document.getElementById('genDynamicFieldsList');
+  if (listEl) {
+    if (!fields.length) {
+      listEl.innerHTML = '<div style="color:var(--muted);font-size:11.5px;padding:6px 10px;background:rgba(0,0,0,0.2);border-radius:4px;">未检测到独立状态变量（无状态 Stateless 契约）</div>';
+    } else {
+      listEl.innerHTML = fields.map(f => {
+        const typeKind = typeof f.type === 'object' ? (f.type.kind || 'int') : (f.type || 'int');
+        let defVal = '0';
+        if (typeKind === 'bool') defVal = 'false';
+        if (typeKind === 'bytes' || typeKind === 'fixed_bytes') defVal = '';
+        if (f.name === 'phase') defVal = '1';
+
+        const isChecked = defVal !== '';
+        return '<div class="field-invariant-row" style="display:flex;align-items:center;gap:8px;background:rgba(0,0,0,0.25);padding:6px 10px;border-radius:var(--radius-sm);border:1px solid var(--border);flex-wrap:wrap;">' +
+          '<label style="display:flex;align-items:center;gap:6px;min-width:140px;cursor:pointer;">' +
+            '<input type="checkbox" class="field-guard-toggle" data-name="' + f.name + '" ' + (isChecked ? 'checked' : '') + ' onchange="rebuildPluginCode()">' +
+            '<strong class="mono" style="color:var(--text);font-size:12px;">' + f.name + '</strong>' +
+            '<span class="tag tag-standby" style="font-size:10px;">' + typeKind + '</span>' +
+          '</label>' +
+          '<div style="flex:1;display:flex;align-items:center;gap:6px;min-width:160px;">' +
+            '<span style="color:var(--muted);font-size:11px;white-space:nowrap;">创世必须等于:</span>' +
+            '<input type="text" class="field-guard-val mono" data-name="' + f.name + '" value="' + defVal + '" style="padding:4px 8px;font-size:12px;height:28px;" placeholder="初始约束值" oninput="rebuildPluginCode()">' +
+          '</div>' +
+        '</div>';
+      }).join('');
+    }
+  }
+
   await rebuildPluginCode();
+};
+
+window.addCustomStateGuardRow = function() {
+  const name = prompt('请输入自定义约束状态字段名 (例如 step 或 counter):');
+  if (!name || !name.trim()) return;
+  const cleanName = name.trim();
+  const listEl = document.getElementById('genDynamicFieldsList');
+  if (!listEl) return;
+
+  const row = document.createElement('div');
+  row.className = 'field-invariant-row';
+  row.style.cssText = 'display:flex;align-items:center;gap:8px;background:rgba(0,0,0,0.25);padding:6px 10px;border-radius:var(--radius-sm);border:1px solid var(--border);flex-wrap:wrap;';
+  row.innerHTML = '<label style="display:flex;align-items:center;gap:6px;min-width:140px;cursor:pointer;">' +
+      '<input type="checkbox" class="field-guard-toggle" data-name="' + cleanName + '" checked onchange="rebuildPluginCode()">' +
+      '<strong class="mono" style="color:var(--text);font-size:12px;">' + cleanName + '</strong>' +
+      '<span class="tag tag-retired" style="font-size:10px;">custom</span>' +
+    '</label>' +
+    '<div style="flex:1;display:flex;align-items:center;gap:6px;min-width:160px;">' +
+      '<span style="color:var(--muted);font-size:11px;white-space:nowrap;">创世必须等于:</span>' +
+      '<input type="text" class="field-guard-val mono" data-name="' + cleanName + '" value="0" style="padding:4px 8px;font-size:12px;height:28px;" placeholder="初始约束值" oninput="rebuildPluginCode()">' +
+    '</div>';
+  listEl.appendChild(row);
+  rebuildPluginCode();
 };
 
 window.rebuildPluginCode = async function() {
@@ -1472,11 +1533,15 @@ window.rebuildPluginCode = async function() {
   const creatorRaw = document.getElementById('genAllowedCreators').value.trim();
   const allowedCreators = creatorRaw ? creatorRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
   
-  let initialStateGuards = null;
-  const guardsRaw = document.getElementById('genStateGuards').value.trim();
-  if (guardsRaw) {
-    try { initialStateGuards = JSON.parse(guardsRaw); } catch {}
-  }
+  // Extract all checked state invariant guards from the UI form
+  const initialStateGuards = {};
+  document.querySelectorAll('.field-invariant-row').forEach(row => {
+    const toggle = row.querySelector('.field-guard-toggle');
+    const input = row.querySelector('.field-guard-val');
+    if (toggle && toggle.checked && input && input.value.trim() !== '') {
+      initialStateGuards[toggle.dataset.name] = input.value.trim();
+    }
+  });
 
   try {
     const res = await api('/generate-plugin', 'POST', {
@@ -1499,7 +1564,7 @@ window.rebuildPluginCode = async function() {
         initialStateGuards,
         allowedCreators
       };
-      showToast('已按最新守门参数更新插件源码！', 'var(--emerald)');
+      showToast('已根据契约参数与守门规则更新源码！', 'var(--emerald)');
     }
   } catch (err) {
     showToast('更新代码失败: ' + err.message, 'var(--rose)');
