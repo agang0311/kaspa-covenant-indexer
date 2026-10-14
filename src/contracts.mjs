@@ -76,7 +76,8 @@ export async function loadContracts(configPath, ctx = {}) {
     const file = /[\\/]/.test(c.module) ? path.resolve(base, c.module) : path.join(BUILTIN_DIR, c.module);
     const sha = crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
     if (c.sha256 && c.sha256 !== sha) throw Error(`CONTRACT_MODULE_HASH_MISMATCH ${c.module} expected ${c.sha256} got ${sha}`);
-    const mod = await import(pathToFileURL(file).href);
+    // Cache bust using file SHA so hot updates re-import cleanly in Node.js ESM
+    const mod = await import(pathToFileURL(file).href + '?v=' + sha);
     if (typeof mod.create !== 'function') throw Error('CONTRACT_MODULE_WITHOUT_CREATE ' + c.module);
     const options = {...c.options};
     if (ctx.registryAddresses !== undefined) options.registryAddresses = ctx.registryAddresses;
