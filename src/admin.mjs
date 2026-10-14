@@ -364,6 +364,60 @@ export async function handleAdmin(req, res, ctx) {
       return true;
     }
 
+    // 4b. Update Plugin Configuration Options (Genesis Guards, Registry, etc.)
+    if (sub === '/plugins/update-config' && req.method === 'POST') {
+      try {
+        const body = await readBody(req);
+        const {index, options, retired} = body;
+        if (!contractsPath || !fs.existsSync(contractsPath)) {
+          send(500, {ok: false, error: 'CONTRACTS_FILE_NOT_FOUND'});
+          return true;
+        }
+
+        const raw = JSON.parse(fs.readFileSync(contractsPath, 'utf8'));
+        if (!Array.isArray(raw.contracts) || !raw.contracts[index]) {
+          send(400, {ok: false, error: 'INVALID_PLUGIN_INDEX'});
+          return true;
+        }
+
+        if (retired !== undefined) raw.contracts[index].retired = Boolean(retired);
+        if (options && typeof options === 'object') {
+          raw.contracts[index].options = {
+            ...(raw.contracts[index].options || {}),
+            ...options
+          };
+        }
+
+        const tmp = contractsPath + '.tmp-' + Date.now();
+        fs.writeFileSync(tmp, JSON.stringify(raw, null, 2) + '\n');
+        fs.renameSync(tmp, contractsPath);
+
+        // Hot reload contracts if possible
+        if (engine && sdk) {
+          const newContracts = await loadContracts(contractsPath, {sdk, network});
+          engine.contracts = newContracts;
+          for (const a of newContracts.watchAddresses()) {
+            try { await engine.subscribe(a); } catch {}
+          }
+          log('PLUGIN_CONFIG_UPDATED', {
+            index,
+            plugin: raw.contracts[index].module,
+            watchAddresses: newContracts.watchAddresses()
+          });
+        }
+
+        send(200, {
+          ok: true,
+          message: 'Plugin configuration updated and reloaded',
+          plugins: engine?.contracts ? engine.contracts.describe() : [],
+          config: raw.contracts
+        });
+      } catch (err) {
+        send(500, {ok: false, error: err.message});
+      }
+      return true;
+    }
+
     // 5. Compile SilverScript Contract (.sil)
     if (sub === '/compile' && req.method === 'POST') {
       try {

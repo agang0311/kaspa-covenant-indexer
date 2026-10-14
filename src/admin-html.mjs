@@ -1,6 +1,8 @@
 // Embedded single-file Web Dashboard for Kaspa Covenant Indexer (KCI)
 // Fully responsive across Mobile & Desktop. Zero viewport spillover.
-// Features Kaswin-style Node Pool Matrix, SilverScript Compiler Workbench, and Visual Consensus Event Feed.
+// Clear separation of concerns:
+// - Compiler Tab (Studio): Compiles .sil to bytecode, template hash, and generates .mjs plugin code.
+// - Plugins Tab (Management): Configures contract operational rules (Registry addresses, Deposit, State Invariants, Active/Retired).
 
 export const ADMIN_HTML = `<!doctype html>
 <html lang="zh-CN">
@@ -63,7 +65,6 @@ html, body {
   box-sizing: border-box;
 }
 
-/* Header Layout */
 header {
   padding: 8px 16px;
   display: flex;
@@ -338,6 +339,10 @@ td {
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
 }
+td.wrap-cell {
+  white-space: normal;
+  word-break: break-all;
+}
 tr:hover td { background: rgba(23, 36, 60, 0.5); }
 
 /* Badges & Tags */
@@ -435,7 +440,7 @@ input:focus, select:focus, textarea:focus {
   display: none;
 }
 
-/* Compiler Workbench Specific Responsive Styles */
+/* Compiler Workbench Toolbar & Controls */
 .compiler-toolbar {
   display: flex;
   justify-content: space-between;
@@ -735,12 +740,12 @@ input:focus, select:focus, textarea:focus {
     </div>
   </section>
 
-  <!-- TAB 3: 契约插件管理 -->
+  <!-- TAB 3: 契约插件管理 (配置与运维中心) -->
   <section id="tab-plugins" class="view-panel">
     <div class="section-head">
       <div>
         <div class="section-title">🧩 Covenant 状态机插件管理 (Contract Plugins)</div>
-        <div class="section-desc">已装载的契约生命周期规则插件。活跃插件主导发现链上 Genesis，退役插件保持历史轮次终态兼容。</div>
+        <div class="section-desc">已装载的契约生命周期规则插件。支持配置创世守门断言、指定监听注册表地址，以及热切换主导/退役状态。</div>
       </div>
       <button class="btn btn-sm" id="btnReloadPlugins">🔄 刷新列表</button>
     </div>
@@ -751,33 +756,33 @@ input:focus, select:focus, textarea:focus {
           <thead>
             <tr>
               <th>契约标识</th>
-              <th>模块源文件</th>
+              <th>模块文件</th>
               <th>Profile 指纹 (SHA256)</th>
-              <th>当前角色</th>
+              <th>监听地址</th>
+              <th>运行角色</th>
               <th>操作</th>
             </tr>
           </thead>
           <tbody id="tblPluginList">
-            <tr><td colspan="5" style="text-align:center;color:var(--muted);">加载中...</td></tr>
+            <tr><td colspan="6" style="text-align:center;color:var(--muted);">加载中...</td></tr>
           </tbody>
         </table>
       </div>
     </div>
   </section>
 
-  <!-- TAB 4: SilverScript 编译工坊 -->
+  <!-- TAB 4: SilverScript 编译工坊 (纯编译与产物生成) -->
   <section id="tab-compiler" class="view-panel">
     <div class="section-head">
       <div>
-        <div class="section-title">🛠️ SilverScript 在线编译器与契约工坊 (SilverScript Studio)</div>
+        <div class="section-title">🛠️ SilverScript 在线编译器 (SilverScript Studio)</div>
         <div class="section-desc">
-          在线编写、语法分析并编译 SilverScript 契约，自动抽取状态字段、方法调度标签（Dispatch Tag）与 32 字节模版哈希。
+          在线编写、语法分析并编译 SilverScript 契约，由 <code>silverc</code> 生成字节码、模版哈希与标准插件代码。
         </div>
       </div>
     </div>
 
     <div class="card" style="margin-bottom:16px;">
-      <!-- 紧凑响应式工具栏 -->
       <div class="compiler-toolbar">
         <div class="compiler-toolbar-left">
           <label style="color:var(--muted);font-size:12px;font-weight:600;white-space:nowrap;">模版:</label>
@@ -800,7 +805,6 @@ input:focus, select:focus, textarea:focus {
         <textarea id="silEditor" class="mono" style="height:210px;font-size:12px;line-height:1.6;" spellcheck="false"></textarea>
       </div>
 
-      <!-- 响应式参数输入与执行按钮 -->
       <div class="compiler-controls">
         <div style="width:100%;">
           <label style="display:block;font-size:11.5px;color:var(--muted);margin-bottom:4px;">
@@ -830,7 +834,6 @@ input:focus, select:focus, textarea:focus {
       <button class="btn btn-sm" id="btnRefreshJournal">🔄 刷新流水</button>
     </div>
 
-    <!-- 事件流水卡片流容器 -->
     <div id="journalFeed" class="journal-feed">
       <div class="card" style="text-align:center;color:var(--muted);">加载中...</div>
     </div>
@@ -856,87 +859,95 @@ input:focus, select:focus, textarea:focus {
   </div>
 </div>
 
-<!-- 插件代码生成与在线安装弹窗 (Phase 3) -->
-<div class="modal-backdrop" id="pluginGenModal" style="display:none;">
-  <div class="modal-box" style="max-width:720px;max-height:92vh;overflow-y:auto;">
+<!-- 契约守门规则与监听地址配置弹窗 (在插件管理页面打开) -->
+<div class="modal-backdrop" id="pluginConfigModal" style="display:none;">
+  <div class="modal-box" style="max-width:680px;max-height:92vh;overflow-y:auto;">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-      <div class="section-title">✨ 生成 Covenant 索引器插件 (Plugin Configuration)</div>
-      <button class="btn btn-sm" onclick="document.getElementById('pluginGenModal').style.display='none'">✕</button>
+      <div class="section-title">⚙️ 配置契约守门规则与监听地址</div>
+      <button class="btn btn-sm" onclick="document.getElementById('pluginConfigModal').style.display='none'">✕</button>
     </div>
 
-    <!-- 1. 基础标识 -->
-    <div class="grid-2col" style="margin-bottom:12px;">
-      <div>
-        <label style="font-size:11.5px;color:var(--muted);display:block;margin-bottom:3px;">插件模块文件名 (.mjs):</label>
-        <input type="text" id="genModuleFile" class="mono" value="counter.mjs">
-      </div>
-      <div>
-        <label style="font-size:11.5px;color:var(--muted);display:block;margin-bottom:3px;">插件唯一 ID (小写短横线):</label>
-        <input type="text" id="genPluginId" class="mono" value="counter">
+    <!-- 插件基本信息展示 -->
+    <div class="card" style="padding:10px 14px;background:var(--bg-panel-elevated);margin-bottom:12px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;">
+        <div>
+          <span style="color:var(--muted);font-size:11px;">契约标识:</span>
+          <strong class="mono" id="cfgModalPluginKey" style="color:var(--kaspa);font-size:13px;">-</strong>
+        </div>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;">
+          <input type="checkbox" id="cfgActiveToggle">
+          <span>设为主导发现新轮次 (Active)</span>
+        </label>
       </div>
     </div>
 
-    <!-- 2. 创世监听与注册表地址配置 -->
+    <!-- 1. 创世监听与注册表地址配置 -->
     <div style="background:var(--bg-panel-elevated);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:12px;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;flex-wrap:wrap;gap:4px;">
         <span style="font-weight:700;font-size:12px;color:var(--kaspa);">📡 创世监听与注册表配置 (Genesis Discovery)</span>
-        <button class="btn btn-sm" type="button" onclick="document.getElementById('genRegistryAddr').value='kaspatest:qztrjpfpuf6g9jw76e6ay909z43hndpv5maqkker6ur4enz7llarsh82ezggl';rebuildPluginCode();">填入官方 TN10 Registry</button>
+        <button class="btn btn-sm" type="button" onclick="document.getElementById('cfgRegistryAddr').value='kaspatest:qztrjpfpuf6g9jw76e6ay909z43hndpv5maqkker6ur4enz7llarsh82ezggl'">填入官方 TN10 Registry</button>
       </div>
       <div class="grid-2col" style="margin-bottom:0;">
         <div>
           <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:2px;">监听的注册表地址 (逗号分隔):</label>
-          <input type="text" id="genRegistryAddr" class="mono" style="font-size:11.5px;" placeholder="kaspatest:qz... (留空需手动 track 创世)">
+          <input type="text" id="cfgRegistryAddr" class="mono" style="font-size:11.5px;" placeholder="kaspatest:qz... (留空需手动 track 创世)">
         </div>
         <div>
           <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:2px;">创世登记费 (sompi, 0为不限):</label>
-          <input type="text" id="genRegSompi" class="mono" style="font-size:11.5px;" value="5000000" placeholder="5000000 (0.05 TKAS)">
+          <input type="text" id="cfgRegSompi" class="mono" style="font-size:11.5px;" value="5000000" placeholder="5000000 (0.05 TKAS)">
         </div>
       </div>
     </div>
 
-    <!-- 3. 合法创世状态与参数守门断言 -->
-    <div style="background:var(--bg-panel-elevated);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:12px;">
+    <!-- 2. 合法创世状态与参数守门断言 -->
+    <div style="background:var(--bg-panel-elevated);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:14px;">
       <div style="font-weight:700;font-size:12px;color:var(--emerald);margin-bottom:6px;">
         🛡️ 合法创世守门断言 (Genesis State Invariants & Guards)
       </div>
       <div class="grid-2col" style="margin-bottom:8px;">
         <div>
-          <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:2px;">创世锁定押金 (sompi, 留空不限):</label>
-          <input type="text" id="genReqDeposit" class="mono" style="font-size:11.5px;" placeholder="如 400000000 (4 TKAS) 或留空">
+          <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:2px;">创世质押金额 (sompi, 留空不限):</label>
+          <input type="text" id="cfgReqDeposit" class="mono" style="font-size:11.5px;" placeholder="如 400000000 (4 TKAS) 或留空">
         </div>
         <div>
           <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:2px;">允许的创建者地址 (白名单, 选填):</label>
-          <input type="text" id="genAllowedCreators" class="mono" style="font-size:11.5px;" placeholder="留空允许任何人创世">
+          <input type="text" id="cfgAllowedCreators" class="mono" style="font-size:11.5px;" placeholder="留空允许任何人创世">
         </div>
       </div>
-      <div style="margin-top:8px;">
+      <div>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;flex-wrap:wrap;gap:4px;">
           <label style="font-size:11px;color:var(--text);font-weight:700;">
-            从编译合约提取的状态参数列表 (勾选并设置创世必须满足的严格约束):
+            状态参数严格约束列表 (勾选并指定创世必须满足的值):
           </label>
-          <button class="btn btn-sm" type="button" onclick="addCustomStateGuardRow()">+ 添加自定义字段</button>
+          <button class="btn btn-sm" type="button" onclick="addCustomStateGuardRow()">+ 添加字段</button>
         </div>
-        <div id="genDynamicFieldsList" style="display:flex;flex-direction:column;gap:6px;">
-          <!-- 动态从编译产物中自动填充 -->
+        <div id="cfgDynamicFieldsList" style="display:flex;flex-direction:column;gap:6px;">
+          <!-- 动态行 -->
         </div>
       </div>
     </div>
 
-    <!-- 4. 实时重算与代码预览 -->
-    <div style="margin-bottom:14px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;flex-wrap:wrap;gap:6px;">
-        <label style="font-size:11.5px;color:var(--muted);">生成插件 JavaScript 源码 (已注入守门规则):</label>
-        <div style="display:flex;gap:6px;">
-          <button class="btn btn-sm" type="button" onclick="rebuildPluginCode()">🔄 更新代码</button>
-          <button class="btn btn-sm" type="button" onclick="copyGenCode()">📋 复制源码</button>
-        </div>
-      </div>
-      <textarea id="genPluginCodeArea" class="mono" style="height:200px;font-size:11.5px;line-height:1.5;background:#050912;" spellcheck="false"></textarea>
-    </div>
-
+    <!-- 底部按钮 -->
     <div style="display:flex;gap:10px;width:100%;box-sizing:border-box;">
-      <button class="btn btn-pri" id="btnInstallGeneratedPlugin" style="flex:2;justify-content:center;height:40px;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">💾 保存并热装载</button>
-      <button class="btn" style="flex:1;justify-content:center;height:40px;font-size:13px;" onclick="document.getElementById('pluginGenModal').style.display='none'">取消</button>
+      <button class="btn btn-pri" id="btnSavePluginConfig" style="flex:2;justify-content:center;height:40px;font-size:13px;">💾 保存配置并热生效</button>
+      <button class="btn" style="flex:1;justify-content:center;height:40px;font-size:13px;" onclick="document.getElementById('pluginConfigModal').style.display='none'">取消</button>
+    </div>
+  </div>
+</div>
+
+<!-- 查看插件源码弹窗 -->
+<div class="modal-backdrop" id="pluginCodeModal" style="display:none;">
+  <div class="modal-box" style="max-width:680px;max-height:90vh;overflow-y:auto;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <div class="section-title">📜 查看生成的插件源代码</div>
+      <button class="btn btn-sm" onclick="document.getElementById('pluginCodeModal').style.display='none'">✕</button>
+    </div>
+    <div style="margin-bottom:12px;">
+      <textarea id="pluginViewCodeArea" class="mono" style="height:280px;font-size:11.5px;line-height:1.5;background:#050912;" readonly></textarea>
+    </div>
+    <div style="display:flex;gap:10px;">
+      <button class="btn btn-pri" style="flex:1;justify-content:center;height:38px;" onclick="copyPluginViewCode()">📋 复制源代码</button>
+      <button class="btn" style="height:38px;" onclick="document.getElementById('pluginCodeModal').style.display='none'">关闭</button>
     </div>
   </div>
 </div>
@@ -1005,7 +1016,7 @@ async function refreshAll() {
     }
     if (daaText) {
       const curDaa = data.activeNode?.virtualDaaScore || data.checkpoint?.virtualDaa;
-      daaText.innerText = curDaa ? ('DAA: ' + curDaa) : '选定链就绪';
+      daaText.innerText = curDaa ? ('选定链 DAA: ' + curDaa) : '选定链就绪';
     }
 
     // Top KPI
@@ -1254,27 +1265,158 @@ document.getElementById('btnProbeNode').onclick = async () => {
   }
 };
 
-// 4. Contract Plugins
+// 4. Contract Plugins Management
 async function loadPluginsTab() {
   try {
     const res = await api('/plugins');
+    window._pluginsData = res;
     const tbody = document.getElementById('tblPluginList');
     const list = res.plugins || [];
-    tbody.innerHTML = list.map((p, idx) => '<tr>' +
-      '<td class="mono"><b>' + p.key + '</b></td>' +
-      '<td class="mono">' + (p.module || '-') + '</td>' +
-      '<td class="mono" style="font-size:12px;color:var(--muted);">' + (p.profileId || '-') + '</td>' +
-      '<td>' + (p.retired ? '<span class="tag tag-retired">RETIRED (兼容)</span>' : '<span class="tag tag-active">ACTIVE (主导)</span>') + '</td>' +
-      '<td>' +
-        '<button class="btn btn-sm" onclick="togglePlugin(' + idx + ', ' + (!p.retired) + ')">' +
-          (p.retired ? '🟢 设为主导发现' : '⏸️ 设为退役兼容') +
-        '</button>' +
-      '</td>' +
-    '</tr>').join('');
+    const cfgList = res.config || [];
+
+    tbody.innerHTML = list.map((p, idx) => {
+      const cfg = cfgList[idx] || {};
+      const regCount = (cfg.options?.registryAddresses?.length) || 0;
+      const watchText = regCount ? ('<span class="tag tag-standby">' + regCount + ' 个地址</span>') : '<span style="color:var(--dim);">无监听</span>';
+
+      return '<tr>' +
+        '<td class="mono"><b>' + p.key + '</b></td>' +
+        '<td class="mono">' + (p.module || '-') + '</td>' +
+        '<td class="mono" style="font-size:12px;color:var(--muted);">' + (p.profileId ? p.profileId.slice(0, 16) + '...' : '-') + '</td>' +
+        '<td>' + watchText + '</td>' +
+        '<td>' + (p.retired ? '<span class="tag tag-retired">RETIRED (兼容)</span>' : '<span class="tag tag-active">ACTIVE (主导)</span>') + '</td>' +
+        '<td>' +
+          '<div style="display:flex;gap:6px;">' +
+            '<button class="btn btn-sm btn-pri" onclick="openPluginConfigModal(' + idx + ')">⚙️ 配置规则</button>' +
+            '<button class="btn btn-sm" onclick="togglePlugin(' + idx + ', ' + (!p.retired) + ')">' +
+              (p.retired ? '🟢 激活' : '⏸️ 退役') +
+            '</button>' +
+          '</div>' +
+        '</td>' +
+      '</tr>';
+    }).join('');
   } catch (err) {
     console.error(err);
   }
 }
+
+// Open Configuration Modal for any plugin in Tab 3
+window.openPluginConfigModal = function(idx) {
+  const data = window._pluginsData;
+  if (!data || !data.plugins || !data.plugins[idx]) return;
+
+  window._currentConfigIndex = idx;
+  const p = data.plugins[idx];
+  const cfg = (data.config && data.config[idx]) || {};
+  const opts = cfg.options || {};
+
+  document.getElementById('cfgModalPluginKey').innerText = p.key;
+  document.getElementById('cfgActiveToggle').checked = !p.retired;
+
+  document.getElementById('cfgRegistryAddr').value = (opts.registryAddresses || []).join(', ');
+  document.getElementById('cfgRegSompi').value = opts.registrationSompi || '5000000';
+  document.getElementById('cfgReqDeposit').value = opts.requiredDeposit || '';
+  document.getElementById('cfgAllowedCreators').value = (opts.allowedCreators || []).join(', ');
+
+  // Render dynamic field guards
+  const listEl = document.getElementById('cfgDynamicFieldsList');
+  const guards = opts.initialStateGuards || {};
+  const entries = Object.entries(guards);
+
+  if (!entries.length) {
+    listEl.innerHTML = '<div style="color:var(--muted);font-size:11.5px;padding:6px 10px;background:rgba(0,0,0,0.2);border-radius:4px;">未配置初始状态字段约束（创世允许任意合规状态）</div>';
+  } else {
+    listEl.innerHTML = entries.map(([k, v]) => {
+      return '<div class="field-invariant-row" style="display:flex;align-items:center;gap:8px;background:rgba(0,0,0,0.25);padding:6px 10px;border-radius:var(--radius-sm);border:1px solid var(--border);flex-wrap:wrap;">' +
+        '<label style="display:flex;align-items:center;gap:6px;min-width:140px;cursor:pointer;">' +
+          '<input type="checkbox" class="field-guard-toggle" data-name="' + k + '" checked>' +
+          '<strong class="mono" style="color:var(--text);font-size:12px;">' + k + '</strong>' +
+        '</label>' +
+        '<div style="flex:1;display:flex;align-items:center;gap:6px;min-width:160px;">' +
+          '<span style="color:var(--muted);font-size:11px;white-space:nowrap;">创世必须等于:</span>' +
+          '<input type="text" class="field-guard-val mono" data-name="' + k + '" value="' + v + '" style="padding:4px 8px;font-size:12px;height:28px;">' +
+        '</div>' +
+      '</div>';
+    }).join('');
+  }
+
+  document.getElementById('pluginConfigModal').style.display = 'flex';
+};
+
+window.addCustomStateGuardRow = function() {
+  const name = prompt('请输入要严格约束的初始状态变量名 (例如 phase, sold, step):');
+  if (!name || !name.trim()) return;
+  const cleanName = name.trim();
+  const listEl = document.getElementById('cfgDynamicFieldsList');
+  if (!listEl) return;
+
+  const row = document.createElement('div');
+  row.className = 'field-invariant-row';
+  row.style.cssText = 'display:flex;align-items:center;gap:8px;background:rgba(0,0,0,0.25);padding:6px 10px;border-radius:var(--radius-sm);border:1px solid var(--border);flex-wrap:wrap;';
+  row.innerHTML = '<label style="display:flex;align-items:center;gap:6px;min-width:140px;cursor:pointer;">' +
+      '<input type="checkbox" class="field-guard-toggle" data-name="' + cleanName + '" checked>' +
+      '<strong class="mono" style="color:var(--text);font-size:12px;">' + cleanName + '</strong>' +
+      '<span class="tag tag-retired" style="font-size:10px;">guard</span>' +
+    '</label>' +
+    '<div style="flex:1;display:flex;align-items:center;gap:6px;min-width:160px;">' +
+      '<span style="color:var(--muted);font-size:11px;white-space:nowrap;">创世必须等于:</span>' +
+      '<input type="text" class="field-guard-val mono" data-name="' + cleanName + '" value="0" style="padding:4px 8px;font-size:12px;height:28px;">' +
+    '</div>';
+  listEl.appendChild(row);
+};
+
+// Save Configuration from Modal
+document.getElementById('btnSavePluginConfig').onclick = async function() {
+  const idx = window._currentConfigIndex;
+  if (idx === undefined || idx === null) return;
+
+  const regRaw = document.getElementById('cfgRegistryAddr').value.trim();
+  const registryAddresses = regRaw ? regRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
+  const registrationSompi = document.getElementById('cfgRegSompi').value.trim() || '0';
+  const requiredDeposit = document.getElementById('cfgReqDeposit').value.trim() || null;
+  const creatorRaw = document.getElementById('cfgAllowedCreators').value.trim();
+  const allowedCreators = creatorRaw ? creatorRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
+  const retired = !document.getElementById('cfgActiveToggle').checked;
+
+  const initialStateGuards = {};
+  document.querySelectorAll('#cfgDynamicFieldsList .field-invariant-row').forEach(row => {
+    const toggle = row.querySelector('.field-guard-toggle');
+    const input = row.querySelector('.field-guard-val');
+    if (toggle && toggle.checked && input && input.value.trim() !== '') {
+      initialStateGuards[toggle.dataset.name] = input.value.trim();
+    }
+  });
+
+  const btn = this;
+  btn.disabled = true;
+  btn.innerText = '正在保存配置并热生效...';
+
+  try {
+    const res = await api('/plugins/update-config', 'POST', {
+      index: idx,
+      retired,
+      options: {
+        registryAddresses,
+        registrationSompi,
+        requiredDeposit,
+        allowedCreators,
+        initialStateGuards
+      }
+    });
+
+    if (res.ok) {
+      document.getElementById('pluginConfigModal').style.display = 'none';
+      showToast('🎉 契约规则配置已保存并热生效！', 'var(--emerald)');
+      await refreshAll();
+      await loadPluginsTab();
+    }
+  } catch (err) {
+    showToast('保存配置失败: ' + err.message, 'var(--rose)');
+  } finally {
+    btn.disabled = false;
+    btn.innerText = '💾 保存配置并热生效';
+  }
+};
 
 window.togglePlugin = async function(index, newRetired) {
   try {
@@ -1292,7 +1434,7 @@ document.getElementById('btnReloadPlugins').onclick = () => {
   showToast('插件列表已刷新');
 };
 
-// 5. SilverScript Studio Workbench
+// 5. SilverScript Studio Workbench (Pure Compiler & Generator)
 const PRESET_CONTRACTS = {
   counter: "contract Decls(int init_value) {\\n    int value = init_value;\\n\\n    #[covenant.singleton(mode = transition)]\\n    function bump(State prev_state, int delta) : (State) {\\n        return(State { value: prev_state.value + delta });\\n    }\\n}",
   empty: "contract CustomContract() {\\n    int count = 0;\\n\\n    #[covenant.singleton(mode = transition)]\\n    function step(State prev_state) : (State) {\\n        return(State { count: prev_state.count + 1 });\\n    }\\n}"
@@ -1444,247 +1586,84 @@ function renderCompileResult(data, box) {
       '<div style="padding:12px 14px;font-weight:700;border-bottom:1px solid var(--border);">⚡ 方法入口与调度标签 (Entrypoints & Dispatch Tags)</div>' +
       '<div class="table-wrap"><table><thead><tr><th>方法标识</th><th>Dispatch Tag</th><th>入参</th></tr></thead><tbody>' + entriesHtml + '</tbody></table></div>' +
     '</div>' +
-    '<div class="card" style="border-color:var(--kaspa);background:rgba(112,199,186,0.04);margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">' +
-      '<div>' +
-        '<div style="font-weight:700;font-size:13.5px;color:var(--kaspa);">✨ 自动化 Covenant 插件组装 (Plugin Generator)</div>' +
-        '<div style="font-size:11.5px;color:var(--muted);margin-top:2px;">基于当前编译产物的 ABI 与模版哈希，自动生成标准 Indexer 状态机插件并一键装载。</div>' +
-      '</div>' +
-      '<button class="btn btn-pri btn-sm" onclick="openPluginGeneratorModal()">✨ 一键组装并在线装载插件 →</button>' +
+    '<div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;">' +
+      '<button class="btn btn-pri" style="flex:2;min-width:220px;justify-content:center;height:40px;" onclick="saveAndGoToPlugins()">' +
+        '💾 保存插件并前往【插件管理】配置规则 →' +
+      '</button>' +
+      '<button class="btn" style="flex:1;min-width:120px;justify-content:center;height:40px;" onclick="viewGeneratedPluginCode()">' +
+        '📜 查看插件源码' +
+      '</button>' +
     '</div>' +
     '<details class="card" style="cursor:pointer;"><summary style="font-weight:600;color:var(--muted);">📦 查看完整编译器 JSON Artifact</summary>' +
       '<pre class="mono" style="margin-top:12px;font-size:11px;overflow:auto;max-height:300px;">' + JSON.stringify(data.artifact, null, 2) + '</pre>' +
     '</details>';
 }
 
-function decodeLedgerFromArgs(args) {
-  if (!Array.isArray(args) || !args.length) return null;
-  for (const item of args) {
-    const val = item?.value || (Array.isArray(item) ? item : null);
-    if (Array.isArray(val) && val.length >= 80) {
-      const magic = String.fromCharCode(...val.slice(0, 4));
-      if (magic === 'KW21' || magic === 'KW20') {
-        const u = (a, w) => {
-          let n = 0n;
-          for (let i = 0; i < w; i++) n |= BigInt(val[a + i]) << BigInt(i * 8);
-          return n;
-        };
-        const num = (a) => Number(u(a, 4));
-        return {
-          phase: num(4),
-          ticketPrice: u(8, 8).toString(),
-          ticketCap: num(16),
-          purchaseCap: num(20),
-          minTickets: num(24),
-          closeEligibleDaa: u(28, 8).toString(),
-          sold: num(36),
-          purchaseCount: num(40),
-          cursor: num(44),
-          ownerKey: Array.from(val.slice(48, 80)).map(b => b.toString(16).padStart(2, '0')).join('')
-        };
-      }
-    }
-  }
-  return null;
-}
-
-window.openPluginGeneratorModal = async function() {
+// Save compiled plugin directly and open configuration in Tab 3
+window.saveAndGoToPlugins = async function() {
   if (!window._lastArtifact) return;
-  const modal = document.getElementById('pluginGenModal');
-  modal.style.display = 'flex';
-  
   const cName = window._lastContractName || Object.keys(window._lastArtifact.contracts || {})[0];
-  const cData = window._lastArtifact.contracts && window._lastArtifact.contracts[cName];
   const pId = (cName || 'contract').toLowerCase();
-  document.getElementById('genModuleFile').value = pId + '.mjs';
-  document.getElementById('genPluginId').value = pId;
+  const filename = pId + '.mjs';
 
-  const listEl = document.getElementById('genDynamicFieldsList');
-  if (listEl) {
-    // 1. Check if this is a Kaswin 80-byte compound ledger
-    const decodedLedger = decodeLedgerFromArgs(window._lastConstructorArgs);
-    if (decodedLedger) {
-      // Auto-prefill deposit to 4 TKAS if empty
-      const depInput = document.getElementById('genReqDeposit');
-      if (depInput && !depInput.value.trim()) depInput.value = '400000000';
-      // Auto-prefill official registry if empty
-      const regInput = document.getElementById('genRegistryAddr');
-      if (regInput && !regInput.value.trim()) regInput.value = 'kaspatest:qztrjpfpuf6g9jw76e6ay909z43hndpv5maqkker6ur4enz7llarsh82ezggl';
+  showToast('正在生成并保存插件 ' + filename + '...', 'var(--kaspa)');
 
-      const kaswinParams = [
-        { name: 'phase', type: 'int', val: decodedLedger.phase, desc: '阶段 (创世必须为 1 · OPEN)', checked: true },
-        { name: 'sold', type: 'int', val: decodedLedger.sold, desc: '已售张数 (创世必须为 0)', checked: true },
-        { name: 'purchaseCount', type: 'int', val: decodedLedger.purchaseCount, desc: '记录数 (创世必须为 0)', checked: true },
-        { name: 'cursor', type: 'int', val: decodedLedger.cursor, desc: '退款游标 (创世必须为 0)', checked: true },
-        { name: 'ticketPrice', type: 'sompi', val: decodedLedger.ticketPrice, desc: '单张票价 (sompi)', checked: true },
-        { name: 'ticketCap', type: 'int', val: decodedLedger.ticketCap, desc: '售票上限 (张)', checked: true },
-        { name: 'minTickets', type: 'int', val: decodedLedger.minTickets, desc: '最低起抽票数', checked: true },
-        { name: 'purchaseCap', type: 'int', val: decodedLedger.purchaseCap, desc: '记录容量上限', checked: true },
-        { name: 'closeEligibleDaa', type: 'int', val: decodedLedger.closeEligibleDaa, desc: '封盘 DAA 延时', checked: false },
-        { name: 'ownerKey', type: 'pubkey', val: decodedLedger.ownerKey, desc: '创建者公钥 (选填)', checked: false }
-      ];
+  try {
+    const genRes = await api('/generate-plugin', 'POST', {
+      artifact: window._lastArtifact,
+      contractName: cName,
+      pluginId: pId
+    });
 
-      listEl.innerHTML = '<div style="font-size:11.5px;color:var(--kaspa);font-weight:700;margin-bottom:4px;">' +
-        '📦 检测到 80 字节复合状态账本 (Kaswin Ledger)，已智能解构成 10 项业务参数：' +
-      '</div>' + kaswinParams.map(f => {
-        return '<div class="field-invariant-row" style="display:flex;align-items:center;gap:8px;background:rgba(0,0,0,0.25);padding:6px 10px;border-radius:var(--radius-sm);border:1px solid var(--border);flex-wrap:wrap;">' +
-          '<label style="display:flex;align-items:center;gap:6px;min-width:140px;cursor:pointer;">' +
-            '<input type="checkbox" class="field-guard-toggle" data-name="' + f.name + '" ' + (f.checked ? 'checked' : '') + ' onchange="rebuildPluginCode()">' +
-            '<strong class="mono" style="color:var(--text);font-size:12px;">' + f.name + '</strong>' +
-            '<span class="tag tag-standby" style="font-size:10px;">' + f.type + '</span>' +
-          '</label>' +
-          '<div style="flex:1;display:flex;align-items:center;gap:6px;min-width:160px;">' +
-            '<span style="color:var(--muted);font-size:11px;white-space:nowrap;">约束值:</span>' +
-            '<input type="text" class="field-guard-val mono" data-name="' + f.name + '" value="' + f.val + '" style="padding:4px 8px;font-size:12px;height:28px;" placeholder="' + f.desc + '" oninput="rebuildPluginCode()">' +
-          '</div>' +
-        '</div>';
-      }).join('');
+    if (!genRes.ok) throw new Error(genRes.detail || '生成插件失败');
 
-    } else {
-      // 2. General Contract: extract fields from compiled artifact
-      const fields = cData?.runtime_state?.fields || [];
-      if (!fields.length) {
-        listEl.innerHTML = '<div style="color:var(--muted);font-size:11.5px;padding:6px 10px;background:rgba(0,0,0,0.2);border-radius:4px;">未检测到独立状态变量（无状态 Stateless 契约）</div>';
-      } else {
-        listEl.innerHTML = fields.map(f => {
-          const typeKind = typeof f.type === 'object' ? (f.type.kind || 'int') : (f.type || 'int');
-          let defVal = '0';
-          if (typeKind === 'bool') defVal = 'false';
-          if (typeKind === 'bytes' || typeKind === 'fixed_bytes') defVal = '';
-          if (f.name === 'phase') defVal = '1';
+    const instRes = await api('/install-plugin', 'POST', {
+      filename,
+      pluginId: pId,
+      code: genRes.code,
+      templateHash: genRes.templateHashHex,
+      activate: true
+    });
 
-          const isChecked = defVal !== '';
-          return '<div class="field-invariant-row" style="display:flex;align-items:center;gap:8px;background:rgba(0,0,0,0.25);padding:6px 10px;border-radius:var(--radius-sm);border:1px solid var(--border);flex-wrap:wrap;">' +
-            '<label style="display:flex;align-items:center;gap:6px;min-width:140px;cursor:pointer;">' +
-              '<input type="checkbox" class="field-guard-toggle" data-name="' + f.name + '" ' + (isChecked ? 'checked' : '') + ' onchange="rebuildPluginCode()">' +
-              '<strong class="mono" style="color:var(--text);font-size:12px;">' + f.name + '</strong>' +
-              '<span class="tag tag-standby" style="font-size:10px;">' + typeKind + '</span>' +
-            '</label>' +
-            '<div style="flex:1;display:flex;align-items:center;gap:6px;min-width:160px;">' +
-              '<span style="color:var(--muted);font-size:11px;white-space:nowrap;">创世必须等于:</span>' +
-              '<input type="text" class="field-guard-val mono" data-name="' + f.name + '" value="' + defVal + '" style="padding:4px 8px;font-size:12px;height:28px;" placeholder="初始约束值" oninput="rebuildPluginCode()">' +
-            '</div>' +
-          '</div>';
-        }).join('');
-      }
+    if (instRes.ok) {
+      showToast('🎉 插件已成功保存！请在插件管理中配置守门规则', 'var(--emerald)');
+      await refreshAll();
+      await loadPluginsTab();
+      // Switch to Plugins Tab
+      document.querySelector('[data-tab="tab-plugins"]').click();
+      // Auto open config modal on the new plugin (index 0)
+      setTimeout(() => openPluginConfigModal(0), 200);
     }
+  } catch (err) {
+    showToast('保存插件失败: ' + err.message, 'var(--rose)');
   }
-
-  await rebuildPluginCode();
 };
 
-window.addCustomStateGuardRow = function() {
-  const name = prompt('请输入自定义约束状态字段名 (例如 step 或 counter):');
-  if (!name || !name.trim()) return;
-  const cleanName = name.trim();
-  const listEl = document.getElementById('genDynamicFieldsList');
-  if (!listEl) return;
-
-  const row = document.createElement('div');
-  row.className = 'field-invariant-row';
-  row.style.cssText = 'display:flex;align-items:center;gap:8px;background:rgba(0,0,0,0.25);padding:6px 10px;border-radius:var(--radius-sm);border:1px solid var(--border);flex-wrap:wrap;';
-  row.innerHTML = '<label style="display:flex;align-items:center;gap:6px;min-width:140px;cursor:pointer;">' +
-      '<input type="checkbox" class="field-guard-toggle" data-name="' + cleanName + '" checked onchange="rebuildPluginCode()">' +
-      '<strong class="mono" style="color:var(--text);font-size:12px;">' + cleanName + '</strong>' +
-      '<span class="tag tag-retired" style="font-size:10px;">custom</span>' +
-    '</label>' +
-    '<div style="flex:1;display:flex;align-items:center;gap:6px;min-width:160px;">' +
-      '<span style="color:var(--muted);font-size:11px;white-space:nowrap;">创世必须等于:</span>' +
-      '<input type="text" class="field-guard-val mono" data-name="' + cleanName + '" value="0" style="padding:4px 8px;font-size:12px;height:28px;" placeholder="初始约束值" oninput="rebuildPluginCode()">' +
-    '</div>';
-  listEl.appendChild(row);
-  rebuildPluginCode();
-};
-
-window.rebuildPluginCode = async function() {
+window.viewGeneratedPluginCode = async function() {
   if (!window._lastArtifact) return;
   const cName = window._lastContractName || Object.keys(window._lastArtifact.contracts || {})[0];
-  const pId = document.getElementById('genPluginId').value.trim() || (cName || 'contract').toLowerCase();
-  const regRaw = document.getElementById('genRegistryAddr').value.trim();
-  const registryAddresses = regRaw ? regRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
-  const registrationSompi = document.getElementById('genRegSompi').value.trim() || '0';
-  const requiredDeposit = document.getElementById('genReqDeposit').value.trim() || null;
-  const creatorRaw = document.getElementById('genAllowedCreators').value.trim();
-  const allowedCreators = creatorRaw ? creatorRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
-  
-  // Extract all checked state invariant guards from the UI form
-  const initialStateGuards = {};
-  document.querySelectorAll('.field-invariant-row').forEach(row => {
-    const toggle = row.querySelector('.field-guard-toggle');
-    const input = row.querySelector('.field-guard-val');
-    if (toggle && toggle.checked && input && input.value.trim() !== '') {
-      initialStateGuards[toggle.dataset.name] = input.value.trim();
-    }
-  });
+  const pId = (cName || 'contract').toLowerCase();
 
   try {
     const res = await api('/generate-plugin', 'POST', {
       artifact: window._lastArtifact,
       contractName: cName,
-      pluginId: pId,
-      registryAddresses,
-      registrationSompi,
-      requiredDeposit,
-      initialStateGuards,
-      allowedCreators
+      pluginId: pId
     });
     if (res.ok) {
-      document.getElementById('genPluginCodeArea').value = res.code;
-      window._generatedTemplateHash = res.templateHashHex;
-      window._currentPluginMeta = {
-        registryAddresses,
-        registrationSompi,
-        requiredDeposit,
-        initialStateGuards,
-        allowedCreators
-      };
-      showToast('已根据契约参数与守门规则更新源码！', 'var(--emerald)');
+      document.getElementById('pluginViewCodeArea').value = res.code;
+      document.getElementById('pluginCodeModal').style.display = 'flex';
     }
   } catch (err) {
-    showToast('更新代码失败: ' + err.message, 'var(--rose)');
+    showToast('查看源码失败: ' + err.message, 'var(--rose)');
   }
 };
 
-window.copyGenCode = function() {
-  const code = document.getElementById('genPluginCodeArea').value;
+window.copyPluginViewCode = function() {
+  const code = document.getElementById('pluginViewCodeArea').value;
   if (navigator.clipboard) {
     navigator.clipboard.writeText(code);
-    showToast('已复制插件源代码！', 'var(--emerald)');
-  }
-};
-
-document.getElementById('btnInstallGeneratedPlugin').onclick = async function() {
-  const filename = document.getElementById('genModuleFile').value.trim();
-  const pluginId = document.getElementById('genPluginId').value.trim();
-  const code = document.getElementById('genPluginCodeArea').value;
-  const meta = window._currentPluginMeta || {};
-  const btn = this;
-  btn.disabled = true;
-  btn.innerText = '正在保存并热装载...';
-
-  try {
-    const res = await api('/install-plugin', 'POST', {
-      filename,
-      pluginId,
-      code,
-      templateHash: window._generatedTemplateHash || null,
-      registryAddresses: meta.registryAddresses || [],
-      registrationSompi: meta.registrationSompi || '0',
-      requiredDeposit: meta.requiredDeposit || null,
-      initialStateGuards: meta.initialStateGuards || null,
-      allowedCreators: meta.allowedCreators || [],
-      activate: true
-    });
-    if (res.ok) {
-      document.getElementById('pluginGenModal').style.display = 'none';
-      showToast('🎉 插件已成功安装并热加载！已开始监听注册表地址', 'var(--emerald)');
-      await refreshAll();
-      document.querySelector('[data-tab="tab-plugins"]').click();
-    }
-  } catch (err) {
-    showToast('装载插件失败: ' + err.message, 'var(--rose)');
-  } finally {
-    btn.disabled = false;
-    btn.innerText = '💾 保存并在线热装载到当前索引器 (Save & Hot-Load)';
+    showToast('已复制插件源码！', 'var(--emerald)');
   }
 };
 
