@@ -47,24 +47,28 @@ body {
 }
 .mono { font-family: var(--font-mono); }
 
-/* Header */
-header {
-  background: rgba(13, 21, 36, 0.9);
-  backdrop-filter: blur(12px);
-  border-bottom: 1px solid var(--border);
-  padding: 12px 24px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+/* Sticky Top Navigation Container */
+.top-nav-bar {
   position: sticky;
   top: 0;
   z-index: 50;
+  background: rgba(13, 21, 36, 0.96);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+}
+
+/* Header */
+header {
+  padding: 10px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 12px;
 }
 .brand {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   flex-shrink: 0;
 }
 .logo-badge {
@@ -73,23 +77,24 @@ header {
   color: var(--kaspa);
   font-size: 11px;
   font-weight: 800;
-  padding: 3px 8px;
+  padding: 2px 7px;
   border-radius: var(--radius-sm);
-  letter-spacing: 0.8px;
+  letter-spacing: 0.6px;
 }
 .brand-title {
-  font-size: 15px;
+  font-size: 14.5px;
   font-weight: 700;
   color: var(--text);
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  white-space: nowrap;
 }
 .header-actions {
   display: flex;
   align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
+  gap: 8px;
+  flex-shrink: 0;
 }
 .status-pill {
   display: inline-flex;
@@ -98,9 +103,9 @@ header {
   background: rgba(16, 185, 129, 0.12);
   color: var(--emerald);
   border: 1px solid rgba(16, 185, 129, 0.3);
-  padding: 4px 12px;
+  padding: 3px 10px;
   border-radius: 999px;
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 600;
   white-space: nowrap;
 }
@@ -110,42 +115,41 @@ header {
   border-color: rgba(245, 158, 11, 0.3);
 }
 .dot {
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   background: currentColor;
   box-shadow: 0 0 8px currentColor;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 680px) {
   header {
-    padding: 10px 14px;
-    flex-wrap: wrap;
+    padding: 8px 12px;
   }
   .brand-title {
-    font-size: 14px;
+    font-size: 13.5px;
   }
   .brand-title .brand-sub {
     display: none;
   }
-  .header-actions {
-    width: 100%;
-    justify-content: space-between;
-    gap: 8px;
-  }
   .status-pill {
-    padding: 3px 8px;
-    font-size: 11px;
+    padding: 2px 8px;
+    font-size: 10.5px;
+  }
+  .btn-text {
+    display: none;
+  }
+  .btn-header {
+    padding: 4px 8px;
   }
 }
 
-/* Tabs: smooth horizontal swipe on mobile */
+/* Tabs: Smooth horizontal swipe on mobile */
 nav.tabs {
-  background: rgba(13, 21, 36, 0.75);
-  border-bottom: 1px solid var(--border);
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
   padding: 0 16px;
   display: flex;
-  gap: 6px;
+  gap: 4px;
   overflow-x: auto;
   white-space: nowrap;
   -webkit-overflow-scrolling: touch;
@@ -157,14 +161,14 @@ nav.tabs::-webkit-scrollbar { display: none; }
   border: none;
   border-bottom: 2px solid transparent;
   color: var(--muted);
-  padding: 11px 14px;
-  font-size: 13px;
+  padding: 10px 14px;
+  font-size: 12.5px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.15s;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   white-space: nowrap;
   flex-shrink: 0;
 }
@@ -204,8 +208,8 @@ main {
   margin-bottom: 20px;
 }
 @media (max-width: 768px) {
-  .grid-cards { grid-template-columns: 1fr; }
-  .grid-2col { grid-template-columns: 1fr; gap: 14px; }
+  .grid-cards { grid-template-columns: 1fr; gap: 10px; margin-bottom: 14px; }
+  .grid-2col { grid-template-columns: 1fr; gap: 14px; margin-bottom: 14px; }
 }
 
 .card {
@@ -266,7 +270,6 @@ main {
     flex-direction: column;
     align-items: flex-start;
   }
-  .section-head-actions,
   .section-head > button {
     width: 100%;
     justify-content: center;
@@ -402,32 +405,106 @@ input:focus, select:focus, textarea:focus {
   z-index: 200;
   display: none;
 }
+
+/* Compiler Workbench Specific Responsive Styles */
+.compiler-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.compiler-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  flex: 1;
+}
+.compiler-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.compiler-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.compiler-btn-group {
+  display: flex;
+  gap: 10px;
+}
+.compiler-btn-group .btn {
+  flex: 1;
+  justify-content: center;
+  height: 38px;
+}
+
+@media (min-width: 769px) {
+  .compiler-controls {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: flex-end;
+    gap: 16px;
+  }
+  .compiler-btn-group .btn {
+    flex: initial;
+    height: auto;
+  }
+}
+
+@media (max-width: 640px) {
+  .compiler-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .compiler-toolbar-left {
+    width: 100%;
+  }
+  .compiler-toolbar-left select {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+  .compiler-toolbar-right {
+    width: 100%;
+    justify-content: space-between;
+  }
+}
 </style>
 </head>
 <body>
 
-<header>
-  <div class="brand">
-    <span class="logo-badge">KCI</span>
-    <div class="brand-title">
-      Kaspa Covenant Indexer
-      <span class="brand-sub" style="font-weight:400;color:var(--muted);font-size:12px;">Studio · TN10</span>
+<div class="top-nav-bar">
+  <header>
+    <div class="brand">
+      <span class="logo-badge">KCI</span>
+      <div class="brand-title">
+        Kaspa Covenant Indexer
+        <span class="brand-sub" style="font-weight:400;color:var(--muted);font-size:12px;">Studio · TN10</span>
+      </div>
     </div>
-  </div>
-  <div class="header-actions">
-    <div id="headerStatusPill" class="status-pill"><span class="dot"></span>连接中...</div>
-    <button class="btn btn-sm" id="btnRefresh" title="刷新状态">🔄 刷新</button>
-    <button class="btn btn-sm" id="btnLogout" title="设置/更换管理员令牌">🔐 令牌鉴权</button>
-  </div>
-</header>
+    <div class="header-actions">
+      <div id="headerStatusPill" class="status-pill"><span class="dot"></span>连接中...</div>
+      <button class="btn btn-sm btn-header" id="btnRefresh" title="刷新状态">
+        <span>🔄</span><span class="btn-text"> 刷新</span>
+      </button>
+      <button class="btn btn-sm btn-header" id="btnLogout" title="设置/更换管理员令牌">
+        <span>🔐</span><span class="btn-text"> 令牌</span>
+      </button>
+    </div>
+  </header>
 
-<nav class="tabs">
-  <button class="tab-btn active" data-tab="tab-overview">📊 运行概览</button>
-  <button class="tab-btn" data-tab="tab-nodes">🛰️ 节点热备池</button>
-  <button class="tab-btn" data-tab="tab-plugins">🧩 契约插件管理</button>
-  <button class="tab-btn" data-tab="tab-compiler">🛠️ SilverScript 编译工坊</button>
-  <button class="tab-btn" data-tab="tab-journal">📜 审计流水</button>
-</nav>
+  <nav class="tabs">
+    <button class="tab-btn active" data-tab="tab-overview">📊 运行概览</button>
+    <button class="tab-btn" data-tab="tab-nodes">🛰️ 节点热备池</button>
+    <button class="tab-btn" data-tab="tab-plugins">🧩 契约插件管理</button>
+    <button class="tab-btn" data-tab="tab-compiler">🛠️ SilverScript 编译工坊</button>
+    <button class="tab-btn" data-tab="tab-journal">📜 审计流水</button>
+  </nav>
+</div>
 
 <main>
   <!-- TAB 1: 运行概览 -->
@@ -619,36 +696,38 @@ input:focus, select:focus, textarea:focus {
           在线编写、语法分析并编译 SilverScript 契约，自动抽取状态字段、方法调度标签（Dispatch Tag）与 32 字节模版哈希。
         </div>
       </div>
-      <div class="section-head-actions" style="display:flex;gap:8px;">
-        <input type="file" id="fileUploadSil" accept=".sil" style="display:none;">
-        <button class="btn btn-sm" id="btnUploadSil" style="width:100%;">📂 载入本地 .sil</button>
-      </div>
     </div>
 
     <div class="card" style="margin-bottom:20px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex:1;">
-          <label style="color:var(--muted);font-size:12px;font-weight:600;white-space:nowrap;">预设模版:</label>
-          <select id="selectContractPreset" style="max-width:320px;padding:5px 8px;font-size:12px;">
+      <!-- 紧凑响应式工具栏 -->
+      <div class="compiler-toolbar">
+        <div class="compiler-toolbar-left">
+          <label style="color:var(--muted);font-size:12px;font-weight:600;white-space:nowrap;">模版:</label>
+          <select id="selectContractPreset" style="padding:5px 8px;font-size:12px;">
             <option value="counter">计数器合约 (Counter.sil · 单例状态机)</option>
             <option value="empty">空白契约模版 (Custom.sil)</option>
           </select>
         </div>
-        <span class="tag tag-active" style="font-size:11px;">silverc v0.1.0 就绪</span>
+        <div class="compiler-toolbar-right">
+          <input type="file" id="fileUploadSil" accept=".sil" style="display:none;">
+          <button class="btn btn-sm" id="btnUploadSil">📂 载入 .sil</button>
+          <span class="tag tag-active" style="font-size:11px;">silverc v0.1.0</span>
+        </div>
       </div>
 
       <div style="margin-bottom:12px;">
-        <textarea id="silEditor" class="mono" style="height:200px;font-size:12px;line-height:1.6;" spellcheck="false"></textarea>
+        <textarea id="silEditor" class="mono" style="height:210px;font-size:12px;line-height:1.6;" spellcheck="false"></textarea>
       </div>
 
-      <div style="display:grid;grid-template-columns:1fr auto;gap:12px;align-items:flex-end;">
-        <div>
+      <!-- 响应式参数输入与执行按钮 -->
+      <div class="compiler-controls">
+        <div style="width:100%;">
           <label style="display:block;font-size:11.5px;color:var(--muted);margin-bottom:4px;">
             构造函数参数 (JSON 数组，如 <code>[0]</code> 或 <code>[]</code>):
           </label>
           <input type="text" id="inputCtorArgs" class="mono" value="[0]">
         </div>
-        <div style="display:flex;gap:8px;">
+        <div class="compiler-btn-group">
           <button class="btn btn-sm" id="btnAstOnly">🔍 语法解析 (AST)</button>
           <button class="btn btn-pri btn-sm" id="btnCompileSil">⚡ 执行编译 (Compile)</button>
         </div>
