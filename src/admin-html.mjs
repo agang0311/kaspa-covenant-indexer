@@ -63,14 +63,28 @@ html, body {
   box-sizing: border-box;
 }
 
+/* Header Layout */
 header {
   padding: 8px 16px;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  flex-direction: column;
+  gap: 6px;
   width: 100%;
   box-sizing: border-box;
+}
+.header-brand-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 10px;
+}
+.header-status-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 10px;
 }
 .brand {
   display: flex;
@@ -95,11 +109,15 @@ header {
   color: var(--text);
   white-space: nowrap;
 }
-.header-actions {
+.header-btns {
   display: flex;
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
+}
+.header-daa-text {
+  font-size: 11.5px;
+  color: var(--muted);
 }
 .status-pill {
   display: inline-flex;
@@ -129,6 +147,30 @@ header {
 .btn-header {
   padding: 4px 8px;
   font-size: 12px;
+}
+
+@media (min-width: 769px) {
+  header {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 24px;
+  }
+  .header-brand-line {
+    width: auto;
+    justify-content: flex-start;
+  }
+  .header-status-line {
+    width: auto;
+    justify-content: flex-end;
+    gap: 12px;
+  }
+}
+
+@media (max-width: 480px) {
+  .btn-text { display: none; }
+  .btn-header { padding: 4px 8px; }
+  .brand-title { font-size: 13.5px; }
 }
 
 /* Tabs: Smooth horizontal swipe on mobile */
@@ -517,14 +559,19 @@ input:focus, select:focus, textarea:focus {
 
 <div class="top-nav-bar">
   <header>
-    <div class="brand">
-      <span class="logo-badge">KCI</span>
-      <span class="brand-title">Covenant Indexer</span>
+    <div class="header-brand-line">
+      <div class="brand">
+        <span class="logo-badge">KCI</span>
+        <span class="brand-title">Kaspa Covenant Indexer</span>
+      </div>
+      <div class="header-btns">
+        <button class="btn btn-header" id="btnRefresh" title="刷新状态">🔄<span class="btn-text"> 刷新</span></button>
+        <button class="btn btn-header" id="btnLogout" title="设置/更换管理员令牌">🔐<span class="btn-text"> 令牌</span></button>
+      </div>
     </div>
-    <div class="header-actions">
+    <div class="header-status-line">
       <div id="headerStatusPill" class="status-pill"><span class="dot"></span><span id="pillText">连接中...</span></div>
-      <button class="btn btn-header" id="btnRefresh" title="刷新状态">🔄</button>
-      <button class="btn btn-header" id="btnLogout" title="设置/更换管理员令牌">🔐</button>
+      <div id="headerDaaText" class="mono header-daa-text">选定链 DAA: --</div>
     </div>
   </header>
 
@@ -860,12 +907,17 @@ async function refreshAll() {
     // Header Pill
     const pill = document.getElementById('headerStatusPill');
     const pillText = document.getElementById('pillText');
+    const daaText = document.getElementById('headerDaaText');
     if (data.activeNode && data.activeNode.isSynced) {
       pill.className = 'status-pill';
-      pillText.innerText = 'TN10 · 已同步';
+      if (pillText) pillText.innerText = 'TN10 · 已同步';
     } else {
       pill.className = 'status-pill degraded';
-      pillText.innerText = 'TN10 · 追块/降级';
+      if (pillText) pillText.innerText = 'TN10 · 追块/降级';
+    }
+    if (daaText) {
+      const curDaa = data.activeNode?.virtualDaaScore || data.checkpoint?.virtualDaa;
+      daaText.innerText = curDaa ? ('DAA: ' + curDaa) : '选定链就绪';
     }
 
     // Top KPI
