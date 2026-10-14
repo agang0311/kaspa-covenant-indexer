@@ -1,11 +1,16 @@
 // SilverScript to Kaspa Covenant Indexer (KCI) Plugin Generator
-import crypto from 'node:crypto';
+// Supports Genesis state invariants, Registry discovery subscriptions, and custom Deposit guards.
 
 export function generatePluginCode({
   artifact,
   contractName = null,
   pluginId = null,
-  version = null
+  version = null,
+  registryAddresses = [],
+  registrationSompi = '5000000',
+  requiredDeposit = null,
+  initialStateGuards = null,
+  allowedCreators = []
 }) {
   if (!artifact || !artifact.contracts) {
     throw new Error('INVALID_ARTIFACT: missing contracts in compilation artifact');
@@ -38,6 +43,12 @@ export function generatePluginCode({
     }
   }
 
+  const cleanRegAddrs = Array.isArray(registryAddresses) ? registryAddresses.filter(Boolean) : [];
+  const cleanCreators = Array.isArray(allowedCreators) ? allowedCreators.filter(Boolean) : [];
+  const cleanGuards = initialStateGuards && typeof initialStateGuards === 'object' ? initialStateGuards : null;
+  const cleanDeposit = requiredDeposit && /^[0-9]+$/.test(String(requiredDeposit)) ? String(requiredDeposit) : null;
+  const cleanRegSompi = registrationSompi && /^[0-9]+$/.test(String(registrationSompi)) ? String(registrationSompi) : '0';
+
   const code = `// Auto-generated Covenant Indexer Plugin for SilverScript contract: ${chosenName}
 // Generated at: ${new Date().toISOString()}
 // Template Hash: ${templateHashHex}
@@ -50,19 +61,23 @@ export const STATE_LEN = ${stateSpan.len};
 export const DISPATCH_TAGS = ${JSON.stringify(tagToMethod, null, 2)};
 export const STATE_FIELDS = ${JSON.stringify(runtimeState.fields, null, 2)};
 
+export const DEFAULT_REGISTRY_ADDRESSES = ${JSON.stringify(cleanRegAddrs)};
+export const DEFAULT_REGISTRATION_SOMPI = ${JSON.stringify(cleanRegSompi)};
+export const REQUIRED_DEPOSIT_SOMPI = ${JSON.stringify(cleanDeposit)};
+export const INITIAL_STATE_GUARDS = ${JSON.stringify(cleanGuards, null, 2)};
+export const ALLOWED_CREATORS = ${JSON.stringify(cleanCreators)};
+
 /**
  * Extracts action / method name from transaction witness or signatureScript
  */
 export function actionOf(tx) {
   const input = tx?.inputs?.[0];
   const sig = input?.signatureScript || '';
-  // Check 4-byte dispatch tag in witness/signatureScript
   if (typeof sig === 'string' && sig.length >= 8) {
     for (const [tag, name] of Object.entries(DISPATCH_TAGS)) {
       if (sig.toLowerCase().includes(tag)) return name;
     }
   }
-  // Check witness items if available
   const witness = input?.witness;
   if (Array.isArray(witness)) {
     for (const item of witness) {
@@ -83,8 +98,18 @@ export async function create(options = {}, context = {}) {
   const pluginVer = options.version || ${JSON.stringify(ver)};
   const targetTemplateHash = options.templateHash || TEMPLATE_HASH;
 
-  // Tracked addresses for event subscriptions (Genesis factory or registry if any)
-  const watch = new Set(Array.isArray(options.watchAddresses) ? options.watchAddresses : []);
+  // 1. Watched Registry Addresses for zero-scan event-driven discovery
+  const watchList = options.registryAddresses || DEFAULT_REGISTRY_ADDRESSES;
+  const watch = new Set(Array.isArray(watchList) ? watchList : []);
+  const regFee = BigInt(options.registrationSompi || DEFAULT_REGISTRATION_SOMPI || '0');
+
+  // 2. Genesis State & Deposit Guards
+  const reqDeposit = options.requiredDeposit !== undefined && options.requiredDeposit !== null
+    ? (options.requiredDeposit === '0' || options.requiredDeposit === null ? null : BigInt(options.requiredDeposit))
+    : (REQUIRED_DEPOSIT_SOMPI ? BigInt(REQUIRED_DEPOSIT_SOMPI) : null);
+
+  const stateGuards = options.initialStateGuards || INITIAL_STATE_GUARDS;
+  const creatorWhitelist = new Set(options.allowedCreators || ALLOWED_CREATORS || []);
 
   /**
    * Fast pre-filter before accepted-row hydration
@@ -102,6 +127,20 @@ export async function create(options = {}, context = {}) {
     if (!spk.includes(targetTemplateHash.toLowerCase())) {
       return {match: false, reason: 'TEMPLATE_HASH_MISMATCH'};
     }
+
+    // Verify Deposit Amount if required by guard
+    if (reqDeposit !== null && BigInt(output.value ?? 0) !== reqDeposit) {
+      return {match: false, reason: 'GENESIS_DEPOSIT_MISMATCH'};
+    }
+
+    // Verify Creator Whitelist if configured
+    if (creatorWhitelist.size > 0) {
+      const senderAddr = tx.inputs?.[0]?.verboseData?.utxoEntry?.scriptPublicKeyAddress;
+      if (!senderAddr || !creatorWhitelist.has(senderAddr)) {
+        return {match: false, reason: 'CREATOR_NOT_WHITELISTED'};
+      }
+    }
+
     return {match: true};
   };
 
@@ -114,8 +153,28 @@ export async function create(options = {}, context = {}) {
     const txid = tx?.verboseData?.transactionId || tx?.transactionId || tx?.id;
     if (!txid) return null;
 
+    const insp = inspectGenesis(tx);
+    if (!insp.match) return null;
+
     const covenantId = output.covenant?.covenantId || txid;
     const spk = output.scriptPublicKey;
+
+    const initialRoundState = {
+      phase: 1,
+      contractName: CONTRACT_NAME,
+      templateHash: targetTemplateHash,
+      step: 0,
+      genesisDaa: block?.daa || null
+    };
+
+    // Verify Initial State Guards if specified
+    if (stateGuards && typeof stateGuards === 'object') {
+      for (const [k, expected] of Object.entries(stateGuards)) {
+        if (initialRoundState[k] !== undefined && String(initialRoundState[k]) !== String(expected)) {
+          return null; // Initial state invariant violated
+        }
+      }
+    }
 
     return {
       id: txid,
@@ -127,13 +186,7 @@ export async function create(options = {}, context = {}) {
       address: output.verboseData?.scriptPublicKeyAddress || null,
       value: String(output.value ?? '0'),
       terminal: null,
-      state: {
-        phase: 1,
-        contractName: CONTRACT_NAME,
-        templateHash: targetTemplateHash,
-        step: 0,
-        genesisDaa: block?.daa || null
-      },
+      state: initialRoundState,
       updatedAt: Date.now()
     };
   };
@@ -148,7 +201,6 @@ export async function create(options = {}, context = {}) {
     const action = actionOf(tx);
     const output = tx?.outputs?.[0];
 
-    // Check if the covenant continues or terminates
     const spk = typeof output?.scriptPublicKey === 'string'
       ? output.scriptPublicKey.toLowerCase()
       : (output?.scriptPublicKey?.script || '').toLowerCase();
@@ -189,7 +241,12 @@ export async function create(options = {}, context = {}) {
     version: pluginVer,
     profileId: targetTemplateHash,
     watchAddresses: () => [...watch],
-    discover: utxo => null,
+    // Event-driven zero-scan discovery via watched registry output
+    discover: u => {
+      if (!u.address || !watch.has(u.address)) return null;
+      if (regFee > 0n && BigInt(u.amount) !== regFee) return null;
+      return u.outpoint?.transactionId || null;
+    },
     candidateGenesis: tx => inspectGenesis(tx).match,
     inspectGenesis,
     matchesGenesis: tx => inspectGenesis(tx).match,
@@ -210,6 +267,11 @@ export async function create(options = {}, context = {}) {
     templateHashHex,
     stateSpan,
     runtimeState,
-    dispatchTags: tagToMethod
+    dispatchTags: tagToMethod,
+    registryAddresses: cleanRegAddrs,
+    registrationSompi: cleanRegSompi,
+    requiredDeposit: cleanDeposit,
+    initialStateGuards: cleanGuards,
+    allowedCreators: cleanCreators
   };
 }

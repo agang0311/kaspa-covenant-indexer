@@ -386,8 +386,28 @@ export async function handleAdmin(req, res, ctx) {
     if (sub === '/generate-plugin' && req.method === 'POST') {
       try {
         const body = await readBody(req);
-        const {artifact, contractName, pluginId, version} = body;
-        const resGen = generatePluginCode({artifact, contractName, pluginId, version});
+        const {
+          artifact,
+          contractName,
+          pluginId,
+          version,
+          registryAddresses,
+          registrationSompi,
+          requiredDeposit,
+          initialStateGuards,
+          allowedCreators
+        } = body;
+        const resGen = generatePluginCode({
+          artifact,
+          contractName,
+          pluginId,
+          version,
+          registryAddresses,
+          registrationSompi,
+          requiredDeposit,
+          initialStateGuards,
+          allowedCreators
+        });
         send(200, resGen);
       } catch (err) {
         send(400, {ok: false, error: 'PLUGIN_GENERATION_FAILED', detail: err.message});
@@ -399,7 +419,19 @@ export async function handleAdmin(req, res, ctx) {
     if (sub === '/install-plugin' && req.method === 'POST') {
       try {
         const body = await readBody(req);
-        const {filename, code, pluginId, version, templateHash, activate = true} = body;
+        const {
+          filename,
+          code,
+          pluginId,
+          version,
+          templateHash,
+          registryAddresses = [],
+          registrationSompi = '5000000',
+          requiredDeposit = null,
+          initialStateGuards = null,
+          allowedCreators = [],
+          activate = true
+        } = body;
 
         if (!filename || !/^[a-z0-9][a-z0-9._-]{0,63}\.mjs$/i.test(filename)) {
           send(400, {ok: false, error: 'INVALID_FILENAME', detail: 'Filename must match /^[a-z0-9._-]+\\.mjs$/'});
@@ -437,7 +469,12 @@ export async function handleAdmin(req, res, ctx) {
           options: {
             id: pluginId || filename.replace(/\.mjs$/, ''),
             version: version || '1.0.0',
-            templateHash: templateHash || null
+            templateHash: templateHash || null,
+            registryAddresses: Array.isArray(registryAddresses) ? registryAddresses : [],
+            registrationSompi: registrationSompi || '0',
+            requiredDeposit: requiredDeposit || null,
+            initialStateGuards: initialStateGuards || null,
+            allowedCreators: Array.isArray(allowedCreators) ? allowedCreators : []
           }
         };
 
@@ -452,11 +489,20 @@ export async function handleAdmin(req, res, ctx) {
         fs.writeFileSync(tmpConfig, JSON.stringify(rawConfig, null, 2) + '\n', 'utf8');
         fs.renameSync(tmpConfig, contractsPath);
 
-        // Hot reload contracts into running engine
+        // Hot reload contracts into running engine and subscribe to new registry addresses
         if (engine && sdk) {
           const newContracts = await loadContracts(contractsPath, {sdk, network});
           engine.contracts = newContracts;
-          log('PLUGIN_INSTALLED_AND_RELOADED', {filename, sha256, active: activate, plugins: newContracts.describe()});
+          for (const a of newContracts.watchAddresses()) {
+            try { await engine.subscribe(a); } catch {}
+          }
+          log('PLUGIN_INSTALLED_AND_RELOADED', {
+            filename,
+            sha256,
+            active: activate,
+            watchAddresses: newContracts.watchAddresses(),
+            plugins: newContracts.describe()
+          });
         }
 
         send(200, {

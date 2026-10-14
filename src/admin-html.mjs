@@ -858,28 +858,75 @@ input:focus, select:focus, textarea:focus {
 
 <!-- 插件代码生成与在线安装弹窗 (Phase 3) -->
 <div class="modal-backdrop" id="pluginGenModal" style="display:none;">
-  <div class="modal-box" style="max-width:680px;max-height:90vh;overflow-y:auto;">
+  <div class="modal-box" style="max-width:720px;max-height:92vh;overflow-y:auto;">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-      <div class="section-title">✨ 生成 Covenant 索引器插件</div>
+      <div class="section-title">✨ 生成 Covenant 索引器插件 (Plugin Configuration)</div>
       <button class="btn btn-sm" onclick="document.getElementById('pluginGenModal').style.display='none'">✕</button>
     </div>
+
+    <!-- 1. 基础标识 -->
     <div class="grid-2col" style="margin-bottom:12px;">
       <div>
         <label style="font-size:11.5px;color:var(--muted);display:block;margin-bottom:3px;">插件模块文件名 (.mjs):</label>
         <input type="text" id="genModuleFile" class="mono" value="counter.mjs">
       </div>
       <div>
-        <label style="font-size:11.5px;color:var(--muted);display:block;margin-bottom:3px;">插件 ID (小写短横线):</label>
+        <label style="font-size:11.5px;color:var(--muted);display:block;margin-bottom:3px;">插件唯一 ID (小写短横线):</label>
         <input type="text" id="genPluginId" class="mono" value="counter">
       </div>
     </div>
-    <div style="margin-bottom:14px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
-        <label style="font-size:11.5px;color:var(--muted);">生成插件 JavaScript 代码 (ES Module):</label>
-        <button class="btn btn-sm" onclick="copyGenCode()">📋 复制源码</button>
+
+    <!-- 2. 创世监听与注册表地址配置 -->
+    <div style="background:var(--bg-panel-elevated);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:12px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;flex-wrap:wrap;gap:4px;">
+        <span style="font-weight:700;font-size:12px;color:var(--kaspa);">📡 创世监听与注册表配置 (Genesis Discovery)</span>
+        <button class="btn btn-sm" type="button" onclick="document.getElementById('genRegistryAddr').value='kaspatest:qztrjpfpuf6g9jw76e6ay909z43hndpv5maqkker6ur4enz7llarsh82ezggl';rebuildPluginCode();">填入官方 TN10 Registry</button>
       </div>
-      <textarea id="genPluginCodeArea" class="mono" style="height:220px;font-size:11.5px;line-height:1.5;background:#050912;" spellcheck="false"></textarea>
+      <div class="grid-2col" style="margin-bottom:0;">
+        <div>
+          <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:2px;">监听的注册表地址 (逗号分隔):</label>
+          <input type="text" id="genRegistryAddr" class="mono" style="font-size:11.5px;" placeholder="kaspatest:qz... (留空需手动 track 创世)">
+        </div>
+        <div>
+          <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:2px;">创世登记费 (sompi, 0为不限):</label>
+          <input type="text" id="genRegSompi" class="mono" style="font-size:11.5px;" value="5000000" placeholder="5000000 (0.05 TKAS)">
+        </div>
+      </div>
     </div>
+
+    <!-- 3. 合法创世状态与参数守门断言 -->
+    <div style="background:var(--bg-panel-elevated);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:12px;">
+      <div style="font-weight:700;font-size:12px;color:var(--emerald);margin-bottom:6px;">
+        🛡️ 合法创世守门断言 (Genesis State Invariants & Guards)
+      </div>
+      <div class="grid-2col" style="margin-bottom:8px;">
+        <div>
+          <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:2px;">创世锁定押金 (sompi, 留空不限):</label>
+          <input type="text" id="genReqDeposit" class="mono" style="font-size:11.5px;" placeholder="如 400000000 (4 TKAS) 或留空">
+        </div>
+        <div>
+          <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:2px;">允许的创建者地址 (白名单, 选填):</label>
+          <input type="text" id="genAllowedCreators" class="mono" style="font-size:11.5px;" placeholder="留空允许任何人创世">
+        </div>
+      </div>
+      <div>
+        <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:2px;">初始状态字段断言 JSON (Initial State Guards):</label>
+        <input type="text" id="genStateGuards" class="mono" style="font-size:11.5px;" value='{"step": 0}' placeholder='如 {"step": 0} 或 {"phase": 1, "sold": 0}'>
+      </div>
+    </div>
+
+    <!-- 4. 实时重算与代码预览 -->
+    <div style="margin-bottom:14px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;flex-wrap:wrap;gap:6px;">
+        <label style="font-size:11.5px;color:var(--muted);">生成插件 JavaScript 源码 (已注入守门规则):</label>
+        <div style="display:flex;gap:6px;">
+          <button class="btn btn-sm" type="button" onclick="rebuildPluginCode()">🔄 更新代码</button>
+          <button class="btn btn-sm" type="button" onclick="copyGenCode()">📋 复制源码</button>
+        </div>
+      </div>
+      <textarea id="genPluginCodeArea" class="mono" style="height:200px;font-size:11.5px;line-height:1.5;background:#050912;" spellcheck="false"></textarea>
+    </div>
+
     <div style="display:flex;gap:10px;flex-wrap:wrap;">
       <button class="btn btn-pri" id="btnInstallGeneratedPlugin" style="flex:1;justify-content:center;">💾 保存并在线热装载到当前索引器 (Save & Hot-Load)</button>
       <button class="btn" onclick="document.getElementById('pluginGenModal').style.display='none'">取消</button>
@@ -1411,18 +1458,51 @@ window.openPluginGeneratorModal = async function() {
   document.getElementById('genModuleFile').value = pId + '.mjs';
   document.getElementById('genPluginId').value = pId;
 
+  await rebuildPluginCode();
+};
+
+window.rebuildPluginCode = async function() {
+  if (!window._lastArtifact) return;
+  const cName = window._lastContractName || Object.keys(window._lastArtifact.contracts || {})[0];
+  const pId = document.getElementById('genPluginId').value.trim() || (cName || 'contract').toLowerCase();
+  const regRaw = document.getElementById('genRegistryAddr').value.trim();
+  const registryAddresses = regRaw ? regRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
+  const registrationSompi = document.getElementById('genRegSompi').value.trim() || '0';
+  const requiredDeposit = document.getElementById('genReqDeposit').value.trim() || null;
+  const creatorRaw = document.getElementById('genAllowedCreators').value.trim();
+  const allowedCreators = creatorRaw ? creatorRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
+  
+  let initialStateGuards = null;
+  const guardsRaw = document.getElementById('genStateGuards').value.trim();
+  if (guardsRaw) {
+    try { initialStateGuards = JSON.parse(guardsRaw); } catch {}
+  }
+
   try {
     const res = await api('/generate-plugin', 'POST', {
       artifact: window._lastArtifact,
       contractName: cName,
-      pluginId: pId
+      pluginId: pId,
+      registryAddresses,
+      registrationSompi,
+      requiredDeposit,
+      initialStateGuards,
+      allowedCreators
     });
     if (res.ok) {
       document.getElementById('genPluginCodeArea').value = res.code;
       window._generatedTemplateHash = res.templateHashHex;
+      window._currentPluginMeta = {
+        registryAddresses,
+        registrationSompi,
+        requiredDeposit,
+        initialStateGuards,
+        allowedCreators
+      };
+      showToast('已按最新守门参数更新插件源码！', 'var(--emerald)');
     }
   } catch (err) {
-    showToast('生成插件失败: ' + err.message, 'var(--rose)');
+    showToast('更新代码失败: ' + err.message, 'var(--rose)');
   }
 };
 
@@ -1438,6 +1518,7 @@ document.getElementById('btnInstallGeneratedPlugin').onclick = async function() 
   const filename = document.getElementById('genModuleFile').value.trim();
   const pluginId = document.getElementById('genPluginId').value.trim();
   const code = document.getElementById('genPluginCodeArea').value;
+  const meta = window._currentPluginMeta || {};
   const btn = this;
   btn.disabled = true;
   btn.innerText = '正在保存并热装载...';
@@ -1448,11 +1529,16 @@ document.getElementById('btnInstallGeneratedPlugin').onclick = async function() 
       pluginId,
       code,
       templateHash: window._generatedTemplateHash || null,
+      registryAddresses: meta.registryAddresses || [],
+      registrationSompi: meta.registrationSompi || '0',
+      requiredDeposit: meta.requiredDeposit || null,
+      initialStateGuards: meta.initialStateGuards || null,
+      allowedCreators: meta.allowedCreators || [],
       activate: true
     });
     if (res.ok) {
       document.getElementById('pluginGenModal').style.display = 'none';
-      showToast('🎉 插件已成功安装并热加载！', 'var(--emerald)');
+      showToast('🎉 插件已成功安装并热加载！已开始监听注册表地址', 'var(--emerald)');
       await refreshAll();
       document.querySelector('[data-tab="tab-plugins"]').click();
     }
