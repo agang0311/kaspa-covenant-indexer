@@ -472,6 +472,46 @@ export async function handleAdmin(req, res, ctx) {
       return true;
     }
 
+    // 8. Get Preset Contract Source (.sil)
+    if (sub === '/preset-contract' && req.method === 'GET') {
+      const name = url.searchParams.get('name');
+      const presetsDir = path.join(path.dirname(path.resolve(contractsPath || '')), 'presets');
+      const map = {
+        'v201-open': {sil: 'open-linked.sil', args: 'open-linked.args.json', title: 'KaswinOpen (V2.0.1)'},
+        'v201-sealed': {sil: 'sealed-linked.sil', args: 'sealed-linked.args.json', title: 'KaswinSealed (V2.0.1)'},
+        'v201-refunding': {sil: 'refunding-linked.sil', args: 'refunding-linked.args.json', title: 'KaswinRefunding (V2.0.1)'}
+      };
+
+      const found = map[name];
+      if (!found) {
+        send(404, {ok: false, error: 'PRESET_NOT_FOUND'});
+        return true;
+      }
+
+      const silPath = path.join(presetsDir, found.sil);
+      const argsPath = path.join(presetsDir, found.args);
+
+      if (!fs.existsSync(silPath)) {
+        send(404, {ok: false, error: 'PRESET_FILE_NOT_FOUND', path: silPath});
+        return true;
+      }
+
+      const source = fs.readFileSync(silPath, 'utf8');
+      let constructorArgs = [];
+      try {
+        constructorArgs = JSON.parse(fs.readFileSync(argsPath, 'utf8'));
+      } catch {}
+
+      send(200, {
+        ok: true,
+        name: found.title,
+        filename: found.sil,
+        source,
+        constructorArgs
+      });
+      return true;
+    }
+
     send(404, {ok: false, error: 'NOT_FOUND'});
     return true;
   }

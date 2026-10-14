@@ -783,6 +783,9 @@ input:focus, select:focus, textarea:focus {
           <label style="color:var(--muted);font-size:12px;font-weight:600;white-space:nowrap;">模版:</label>
           <select id="selectContractPreset" style="padding:5px 8px;font-size:12px;">
             <option value="counter">计数器合约 (Counter.sil · 单例状态机)</option>
+            <option value="v201-open">Kaswin V2.0.1 · Open 开放售票帧 (KaswinOpen.sil)</option>
+            <option value="v201-sealed">Kaswin V2.0.1 · Sealed 封存待抽帧 (KaswinSealed.sil)</option>
+            <option value="v201-refunding">Kaswin V2.0.1 · Refunding 批量退款帧 (KaswinRefunding.sil)</option>
             <option value="empty">空白契约模版 (Custom.sil)</option>
           </select>
         </div>
@@ -1246,8 +1249,23 @@ if (editor) editor.value = PRESET_CONTRACTS.counter;
 
 const presetSelect = document.getElementById('selectContractPreset');
 if (presetSelect) {
-  presetSelect.onchange = e => {
+  presetSelect.onchange = async e => {
     const v = e.target.value;
+    if (v.startsWith('v201-')) {
+      showToast('正在从本地载入 V2.0.1 契约源码与参数...', 'var(--kaspa)');
+      try {
+        const res = await api('/preset-contract?name=' + v);
+        if (res.ok && editor) {
+          editor.value = res.source;
+          const ctorInput = document.getElementById('inputCtorArgs');
+          if (ctorInput) ctorInput.value = JSON.stringify(res.constructorArgs);
+          showToast('已载入 ' + res.name + ' 契约源码！', 'var(--emerald)');
+        }
+      } catch (err) {
+        showToast('载入预设失败: ' + err.message, 'var(--rose)');
+      }
+      return;
+    }
     if (PRESET_CONTRACTS[v] && editor) {
       editor.value = PRESET_CONTRACTS[v];
       const ctorInput = document.getElementById('inputCtorArgs');
