@@ -1,6 +1,6 @@
 // Embedded single-file Web Dashboard for Kaspa Covenant Indexer (KCI)
-// Fully responsive across Mobile & Desktop.
-// Design language: Kaswin Dark Space canvas, Kaspa Turquoise accents, clean spacing & touch-friendly controls.
+// Fully responsive across Mobile & Desktop. Zero viewport spillover.
+// Features Kaswin-style Node Pool Matrix, SilverScript Compiler Workbench, and Visual Consensus Event Feed.
 
 export const ADMIN_HTML = `<!doctype html>
 <html lang="zh-CN">
@@ -32,7 +32,10 @@ export const ADMIN_HTML = `<!doctype html>
   --radius-lg: 14px;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body {
+html, body {
+  width: 100%;
+  max-width: 100vw;
+  overflow-x: hidden;
   background: var(--bg);
   background-image: 
     radial-gradient(ellipse 60% 40% at 50% -10%, rgba(112, 199, 186, 0.08) 0%, transparent 70%),
@@ -47,29 +50,33 @@ body {
 }
 .mono { font-family: var(--font-mono); }
 
-/* Sticky Top Navigation Container */
+/* Top Navigation Bar: Sticky Header + Tabs */
 .top-nav-bar {
   position: sticky;
   top: 0;
   z-index: 50;
-  background: rgba(13, 21, 36, 0.96);
+  width: 100%;
+  max-width: 100vw;
+  background: rgba(11, 18, 30, 0.96);
   backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--border);
+  box-sizing: border-box;
 }
 
-/* Header */
 header {
-  padding: 10px 20px;
+  padding: 8px 16px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
+  width: 100%;
+  box-sizing: border-box;
 }
 .brand {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-shrink: 0;
+  min-width: 0;
 }
 .logo-badge {
   background: var(--kaspa-dim);
@@ -80,32 +87,30 @@ header {
   padding: 2px 7px;
   border-radius: var(--radius-sm);
   letter-spacing: 0.6px;
+  flex-shrink: 0;
 }
 .brand-title {
-  font-size: 14.5px;
+  font-size: 14px;
   font-weight: 700;
   color: var(--text);
-  display: flex;
-  align-items: center;
-  gap: 6px;
   white-space: nowrap;
 }
 .header-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   flex-shrink: 0;
 }
 .status-pill {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   background: rgba(16, 185, 129, 0.12);
   color: var(--emerald);
   border: 1px solid rgba(16, 185, 129, 0.3);
-  padding: 3px 10px;
+  padding: 3px 9px;
   border-radius: 999px;
-  font-size: 11.5px;
+  font-size: 11px;
   font-weight: 600;
   white-space: nowrap;
 }
@@ -119,41 +124,25 @@ header {
   height: 6px;
   border-radius: 50%;
   background: currentColor;
-  box-shadow: 0 0 8px currentColor;
+  box-shadow: 0 0 6px currentColor;
 }
-
-@media (max-width: 680px) {
-  header {
-    padding: 8px 12px;
-  }
-  .brand-title {
-    font-size: 13.5px;
-  }
-  .brand-title .brand-sub {
-    display: none;
-  }
-  .status-pill {
-    padding: 2px 8px;
-    font-size: 10.5px;
-  }
-  .btn-text {
-    display: none;
-  }
-  .btn-header {
-    padding: 4px 8px;
-  }
+.btn-header {
+  padding: 4px 8px;
+  font-size: 12px;
 }
 
 /* Tabs: Smooth horizontal swipe on mobile */
 nav.tabs {
   border-top: 1px solid rgba(255, 255, 255, 0.04);
-  padding: 0 16px;
+  padding: 0 12px;
   display: flex;
-  gap: 4px;
+  gap: 2px;
   overflow-x: auto;
   white-space: nowrap;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
+  width: 100%;
+  box-sizing: border-box;
 }
 nav.tabs::-webkit-scrollbar { display: none; }
 .tab-btn {
@@ -161,7 +150,7 @@ nav.tabs::-webkit-scrollbar { display: none; }
   border: none;
   border-bottom: 2px solid transparent;
   color: var(--muted);
-  padding: 10px 14px;
+  padding: 9px 12px;
   font-size: 12.5px;
   font-weight: 600;
   cursor: pointer;
@@ -181,15 +170,14 @@ nav.tabs::-webkit-scrollbar { display: none; }
 /* Layout */
 main {
   flex: 1;
-  padding: 20px;
+  padding: 16px;
   max-width: 1320px;
   width: 100%;
   margin: 0 auto;
+  box-sizing: border-box;
 }
 @media (max-width: 768px) {
-  main {
-    padding: 12px;
-  }
+  main { padding: 12px; }
 }
 .view-panel { display: none; }
 .view-panel.active { display: block; }
@@ -197,26 +185,26 @@ main {
 /* Grids */
 .grid-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 14px;
-  margin-bottom: 20px;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
 }
 .grid-2col {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 16px;
-  margin-bottom: 20px;
+  gap: 14px;
+  margin-bottom: 16px;
 }
 @media (max-width: 768px) {
-  .grid-cards { grid-template-columns: 1fr; gap: 10px; margin-bottom: 14px; }
-  .grid-2col { grid-template-columns: 1fr; gap: 14px; margin-bottom: 14px; }
+  .grid-cards { grid-template-columns: 1fr; gap: 10px; margin-bottom: 12px; }
+  .grid-2col { grid-template-columns: 1fr; gap: 12px; margin-bottom: 12px; }
 }
 
 .card {
   background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: 16px 18px;
+  padding: 14px 16px;
   transition: border-color 0.15s;
 }
 .card:hover { border-color: var(--border-light); }
@@ -226,21 +214,21 @@ main {
   text-transform: uppercase;
   letter-spacing: 0.6px;
   font-weight: 600;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
   display: flex;
   justify-content: space-between;
   align-items: center;
 }
 .card-val {
-  font-size: 20px;
+  font-size: 19px;
   font-weight: 700;
   color: var(--text);
   line-height: 1.2;
 }
 .card-sub {
-  font-size: 12px;
+  font-size: 11.5px;
   color: var(--muted);
-  margin-top: 6px;
+  margin-top: 5px;
 }
 
 /* Section Header */
@@ -248,27 +236,27 @@ main {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin: 18px 0 12px;
+  margin: 14px 0 10px;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 8px;
 }
 .section-title {
-  font-size: 15px;
+  font-size: 14.5px;
   font-weight: 700;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   color: var(--text);
 }
 .section-desc {
   font-size: 12px;
   color: var(--muted);
-  margin-top: 3px;
+  margin-top: 2px;
 }
 @media (max-width: 768px) {
   .section-head {
     flex-direction: column;
-    align-items: flex-start;
+    align-items: stretch;
   }
   .section-head > button {
     width: 100%;
@@ -279,35 +267,34 @@ main {
 /* Tables & Wrappers */
 .table-wrap {
   width: 100%;
+  max-width: 100%;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
+}
+.table-wrap table {
+  min-width: 520px;
+}
+.table-wrap-compact table {
+  min-width: 100%;
 }
 table {
   width: 100%;
   border-collapse: collapse;
   font-size: 12px;
-  min-width: 540px;
-}
-.table-wrap-compact table {
-  min-width: 100%;
 }
 th {
   background: rgba(18, 29, 48, 0.7);
   color: var(--muted);
   font-weight: 600;
   text-align: left;
-  padding: 10px 12px;
+  padding: 9px 12px;
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
 }
 td {
-  padding: 10px 12px;
+  padding: 9px 12px;
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
-}
-td.wrap-cell {
-  white-space: normal;
-  word-break: break-all;
 }
 tr:hover td { background: rgba(23, 36, 60, 0.5); }
 
@@ -333,15 +320,15 @@ tr:hover td { background: rgba(23, 36, 60, 0.5); }
   background: var(--bg-panel-elevated);
   color: var(--text);
   border: 1px solid var(--border);
-  padding: 7px 14px;
+  padding: 6px 12px;
   border-radius: var(--radius-sm);
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.15s;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   white-space: nowrap;
 }
 .btn:hover { border-color: var(--kaspa); color: var(--kaspa); background: var(--bg-panel-hover); }
@@ -351,7 +338,7 @@ tr:hover td { background: rgba(23, 36, 60, 0.5); }
   border-color: var(--kaspa);
 }
 .btn-pri:hover { background: #5ebaa9; color: #04100c; }
-.btn-sm { padding: 4px 10px; font-size: 11.5px; }
+.btn-sm { padding: 4px 9px; font-size: 11.5px; }
 
 /* Inputs */
 input, select, textarea {
@@ -385,9 +372,9 @@ input:focus, select:focus, textarea:focus {
   background: var(--bg-panel);
   border: 1px solid var(--border-light);
   border-radius: var(--radius-lg);
-  max-width: 460px;
+  max-width: 440px;
   width: 100%;
-  padding: 22px;
+  padding: 20px;
   box-shadow: 0 20px 45px rgba(0, 0, 0, 0.6);
 }
 .toast {
@@ -400,7 +387,7 @@ input:focus, select:focus, textarea:focus {
   padding: 10px 18px;
   border-radius: var(--radius-md);
   box-shadow: 0 10px 25px rgba(0,0,0,0.5);
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 600;
   z-index: 200;
   display: none;
@@ -419,7 +406,6 @@ input:focus, select:focus, textarea:focus {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
   flex: 1;
 }
 .compiler-toolbar-right {
@@ -466,12 +452,64 @@ input:focus, select:focus, textarea:focus {
   }
   .compiler-toolbar-left select {
     width: 100% !important;
-    max-width: 100% !important;
   }
   .compiler-toolbar-right {
     width: 100%;
     justify-content: space-between;
   }
+}
+
+/* Journal Activity Feed Styles */
+.journal-feed {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.journal-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  transition: border-color 0.15s;
+}
+.journal-card:hover {
+  border-color: var(--border-light);
+}
+.journal-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.journal-time {
+  font-size: 11px;
+  color: var(--muted);
+}
+.journal-body {
+  font-size: 12px;
+  line-height: 1.6;
+}
+.journal-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 4px 12px;
+}
+.journal-field {
+  display: flex;
+  gap: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.journal-field-label {
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.journal-field-val {
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 </style>
 </head>
@@ -481,19 +519,12 @@ input:focus, select:focus, textarea:focus {
   <header>
     <div class="brand">
       <span class="logo-badge">KCI</span>
-      <div class="brand-title">
-        Kaspa Covenant Indexer
-        <span class="brand-sub" style="font-weight:400;color:var(--muted);font-size:12px;">Studio · TN10</span>
-      </div>
+      <span class="brand-title">Covenant Indexer</span>
     </div>
     <div class="header-actions">
-      <div id="headerStatusPill" class="status-pill"><span class="dot"></span>连接中...</div>
-      <button class="btn btn-sm btn-header" id="btnRefresh" title="刷新状态">
-        <span>🔄</span><span class="btn-text"> 刷新</span>
-      </button>
-      <button class="btn btn-sm btn-header" id="btnLogout" title="设置/更换管理员令牌">
-        <span>🔐</span><span class="btn-text"> 令牌</span>
-      </button>
+      <div id="headerStatusPill" class="status-pill"><span class="dot"></span><span id="pillText">连接中...</span></div>
+      <button class="btn btn-header" id="btnRefresh" title="刷新状态">🔄</button>
+      <button class="btn btn-header" id="btnLogout" title="设置/更换管理员令牌">🔐</button>
     </div>
   </header>
 
@@ -535,7 +566,7 @@ input:focus, select:focus, textarea:focus {
     <div class="grid-2col">
       <!-- 双节点状态速览 -->
       <div class="card" style="padding:0;overflow:hidden;">
-        <div style="padding:12px 16px;border-bottom:1px solid var(--border);font-weight:700;display:flex;justify-content:space-between;align-items:center;">
+        <div style="padding:12px 14px;border-bottom:1px solid var(--border);font-weight:700;display:flex;justify-content:space-between;align-items:center;">
           <span>🛰️ 双节点热备当前拓扑</span>
           <button class="btn btn-sm" onclick="document.querySelector('[data-tab=\\'tab-nodes\\']').click()">完整节点池 →</button>
         </div>
@@ -557,7 +588,7 @@ input:focus, select:focus, textarea:focus {
 
       <!-- 契约版本分布速览 -->
       <div class="card" style="padding:0;overflow:hidden;">
-        <div style="padding:12px 16px;border-bottom:1px solid var(--border);font-weight:700;display:flex;justify-content:space-between;align-items:center;">
+        <div style="padding:12px 14px;border-bottom:1px solid var(--border);font-weight:700;display:flex;justify-content:space-between;align-items:center;">
           <span>🧩 Covenant 契约版本分布</span>
           <button class="btn btn-sm" onclick="document.querySelector('[data-tab=\\'tab-plugins\\']').click()">插件管理 →</button>
         </div>
@@ -612,10 +643,10 @@ input:focus, select:focus, textarea:focus {
     </div>
 
     <!-- 候选节点池列表 -->
-    <div class="card" style="padding:0;overflow:hidden;margin-bottom:20px;">
-      <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;">
+    <div class="card" style="padding:0;overflow:hidden;margin-bottom:16px;">
+      <div style="padding:12px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;">
         <span style="font-weight:700;">🌐 候选节点池健康矩阵 (TN10 Seeds & Pool)</span>
-        <span style="color:var(--muted);font-size:11.5px;">注：标记【共享后端】的节点属于同一实例，不可互为双备</span>
+        <span style="color:var(--muted);font-size:11px;">注：标记【共享后端】的节点属于同一物理实例，不可互为双备</span>
       </div>
       <div class="table-wrap">
         <table>
@@ -643,7 +674,7 @@ input:focus, select:focus, textarea:focus {
         输入任意自定义 Kaspa wRPC 节点（支持 ws:// 或 wss://，需开放 Borsh 端口），即时探测网络、延迟与 DAG Sink 状态：
       </div>
       <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
-        <input type="text" id="inputProbeUrl" class="mono" placeholder="ws://127.0.0.1:17210 或 wss://..." value="wss://quark-10.kaspa.red/kaspa/testnet-10/wrpc/borsh" style="flex:1;min-width:240px;">
+        <input type="text" id="inputProbeUrl" class="mono" placeholder="ws://127.0.0.1:17210 或 wss://..." value="wss://quark-10.kaspa.red/kaspa/testnet-10/wrpc/borsh" style="flex:1;min-width:200px;">
         <button class="btn btn-sm" id="btnProbeNode" style="white-space:nowrap;">🚀 测速与体检</button>
       </div>
       <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:11px;color:var(--muted);">
@@ -667,7 +698,7 @@ input:focus, select:focus, textarea:focus {
       <button class="btn btn-sm" id="btnReloadPlugins">🔄 刷新列表</button>
     </div>
 
-    <div class="card" style="padding:0;overflow:hidden;margin-bottom:20px;">
+    <div class="card" style="padding:0;overflow:hidden;margin-bottom:16px;">
       <div class="table-wrap">
         <table>
           <thead>
@@ -698,7 +729,7 @@ input:focus, select:focus, textarea:focus {
       </div>
     </div>
 
-    <div class="card" style="margin-bottom:20px;">
+    <div class="card" style="margin-bottom:16px;">
       <!-- 紧凑响应式工具栏 -->
       <div class="compiler-toolbar">
         <div class="compiler-toolbar-left">
@@ -734,32 +765,24 @@ input:focus, select:focus, textarea:focus {
       </div>
     </div>
 
-    <div id="compilerResultBox" style="display:none;margin-top:20px;"></div>
+    <div id="compilerResultBox" style="display:none;margin-top:16px;"></div>
   </section>
 
-  <!-- TAB 5: 审计流水 -->
+  <!-- TAB 5: 审计流水 (事件流 Feed 卡片) -->
   <section id="tab-journal" class="view-panel">
     <div class="section-head">
       <div>
         <div class="section-title">📜 实时系统事件与共识审计流水 (Consensus Journal)</div>
-        <div class="section-desc">由单写入者 SQLite 数据库原子记录的交易演进、区块包含、状态迁移与重组回退事件。</div>
+        <div class="section-desc">
+          由 SQLite 原子记录的 Kaspa 链上 Covenant 状态机演进日志：包含交易接受（APPLIED）、UTXO 花费（SPENT_EVENT）、链重组回退（ROLLBACK）与节点异常（ERROR）。
+        </div>
       </div>
+      <button class="btn btn-sm" id="btnRefreshJournal">🔄 刷新流水</button>
     </div>
-    <div class="card" style="padding:0;overflow:hidden;">
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>发生时间</th>
-              <th>事件类别</th>
-              <th>详细上下文</th>
-            </tr>
-          </thead>
-          <tbody id="tblJournal">
-            <tr><td colspan="3" style="text-align:center;color:var(--muted);">加载中...</td></tr>
-          </tbody>
-        </table>
-      </div>
+
+    <!-- 事件流水卡片流容器 -->
+    <div id="journalFeed" class="journal-feed">
+      <div class="card" style="text-align:center;color:var(--muted);">加载中...</div>
     </div>
   </section>
 </main>
@@ -767,7 +790,7 @@ input:focus, select:focus, textarea:focus {
 <!-- 身份鉴权弹窗 -->
 <div class="modal-backdrop" id="authModal" style="display:none;">
   <div class="modal-box">
-    <div class="section-title" style="margin-bottom:10px;">🔐 管理员身份验证</div>
+    <div class="section-title" style="margin-bottom:8px;">🔐 管理员身份验证</div>
     <div class="section-desc" style="margin-bottom:16px;">
       当前控制台接口受管理员令牌保护。请输入服务配置的 <code>ADMIN_TOKEN</code>：
     </div>
@@ -836,12 +859,13 @@ async function refreshAll() {
 
     // Header Pill
     const pill = document.getElementById('headerStatusPill');
+    const pillText = document.getElementById('pillText');
     if (data.activeNode && data.activeNode.isSynced) {
       pill.className = 'status-pill';
-      pill.innerHTML = '<span class="dot"></span>' + data.network.toUpperCase() + ' · 已同步';
+      pillText.innerText = 'TN10 · 已同步';
     } else {
       pill.className = 'status-pill degraded';
-      pill.innerHTML = '<span class="dot"></span>' + data.network.toUpperCase() + ' · 追块中/降级';
+      pillText.innerText = 'TN10 · 追块/降级';
     }
 
     // Top KPI
@@ -902,18 +926,8 @@ async function refreshAll() {
       }).join('');
     }
 
-    // Journal
-    const jTbody = document.getElementById('tblJournal');
-    const logs = data.journal || [];
-    if (!logs.length) {
-      jTbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--muted);">暂无事件日志</td></tr>';
-    } else {
-      jTbody.innerHTML = logs.map(l => '<tr>' +
-        '<td style="white-space:nowrap;color:var(--muted);">' + new Date(l.at).toLocaleTimeString() + '</td>' +
-        '<td><span class="mono" style="font-weight:700;color:var(--kaspa);">' + l.kind + '</span></td>' +
-        '<td class="mono wrap-cell" style="font-size:11.5px;">' + (typeof l.detail === 'object' ? JSON.stringify(l.detail) : l.detail) + '</td>' +
-      '</tr>').join('');
-    }
+    // Render Journal Feed
+    renderJournalFeed(data.journal || []);
 
   } catch (err) {
     if (err.message !== 'UNAUTHORIZED') {
@@ -921,6 +935,88 @@ async function refreshAll() {
     }
   }
 }
+
+// Render Journal Feed into clean human-readable cards
+function renderJournalFeed(logs) {
+  const container = document.getElementById('journalFeed');
+  if (!container) return;
+  if (!logs || !logs.length) {
+    container.innerHTML = '<div class="card" style="text-align:center;color:var(--muted);">暂无审计事件日志</div>';
+    return;
+  }
+
+  container.innerHTML = logs.map(l => {
+    const timeStr = new Date(l.at).toLocaleTimeString();
+    const d = l.data || l.detail || {};
+
+    let tagClass = 'tag-active';
+    let kindLabel = l.kind;
+    let borderStyle = '';
+    let bodyHtml = '';
+
+    if (l.kind === 'APPLIED') {
+      tagClass = 'tag-active';
+      kindLabel = '✓ 链上转移生效 (' + (d.kind || 'ACTION') + ')';
+      bodyHtml = '<div class="journal-grid">' +
+        '<div class="journal-field"><span class="journal-field-label">轮次 ID:</span><span class="journal-field-val mono">' + (d.round ? d.round.slice(0, 16) + '...' : '-') + '</span></div>' +
+        '<div class="journal-field"><span class="journal-field-label">序号:</span><span class="journal-field-val mono">Seq #' + (d.seq ?? '-') + '</span></div>' +
+        '<div class="journal-field"><span class="journal-field-label">交易 TXID:</span><span class="journal-field-val mono">' + (d.txid ? d.txid.slice(0, 16) + '...' : '-') + '</span></div>' +
+        '<div class="journal-field"><span class="journal-field-label">接受块:</span><span class="journal-field-val mono">' + (d.accepting ? d.accepting.slice(0, 16) + '...' : '-') + '</span></div>' +
+        '<div class="journal-field"><span class="journal-field-label">状态核验:</span><span class="journal-field-val mono" style="color:var(--kaspa);">' + (d.utxoCheck || 'PASS') + '</span></div>' +
+      '</div>';
+    } else if (l.kind === 'SPENT_EVENT') {
+      tagClass = 'tag-standby';
+      kindLabel = '⚡ 链尖 UTXO 花费事件';
+      const op = d.outpoint ? (d.outpoint.transactionId?.slice(0, 16) + '...:' + d.outpoint.index) : '-';
+      bodyHtml = '<div class="journal-grid">' +
+        '<div class="journal-field"><span class="journal-field-label">轮次 ID:</span><span class="journal-field-val mono">' + (d.round ? d.round.slice(0, 16) + '...' : '-') + '</span></div>' +
+        '<div class="journal-field"><span class="journal-field-label">已花费 Tip:</span><span class="journal-field-val mono">' + op + '</span></div>' +
+      '</div><div style="font-size:11px;color:var(--muted);margin-top:4px;">节点推送此 UTXO 被花费，触发后继状态机解析</div>';
+    } else if (l.kind === 'ROLLBACK' || l.kind === 'ROLLBACK_REPLAY') {
+      tagClass = 'tag-warn';
+      borderStyle = 'border-left: 3px solid var(--amber);';
+      kindLabel = l.kind === 'ROLLBACK' ? '⚠️ 选定链重组回退 (Rollback)' : '🔄 重组快速重放恢复 (Replay)';
+      bodyHtml = '<div class="journal-grid">' +
+        '<div class="journal-field"><span class="journal-field-label">轮次 ID:</span><span class="journal-field-val mono">' + (d.round ? d.round.slice(0, 16) + '...' : '-') + '</span></div>' +
+        (d.fromSeq !== undefined ? '<div class="journal-field"><span class="journal-field-label">回退起始:</span><span class="journal-field-val mono">Seq #' + d.fromSeq + '</span></div>' : '') +
+        (d.txid ? '<div class="journal-field"><span class="journal-field-label">重放 TXID:</span><span class="journal-field-val mono">' + d.txid.slice(0, 16) + '...</span></div>' : '') +
+      '</div>';
+    } else if (l.kind === 'DISCOVERY_MARKER') {
+      tagClass = 'tag-standby';
+      kindLabel = '🔍 发现新契约创世 (Discovery)';
+      bodyHtml = '<div class="journal-grid">' +
+        '<div class="journal-field"><span class="journal-field-label">合约规则:</span><span class="journal-field-val mono">' + (d.contract || '-') + '</span></div>' +
+        '<div class="journal-field"><span class="journal-field-label">创世 TXID:</span><span class="journal-field-val mono">' + (d.txid ? d.txid.slice(0, 16) + '...' : '-') + '</span></div>' +
+        '<div class="journal-field"><span class="journal-field-label">发生 DAA:</span><span class="journal-field-val mono">' + (d.daa || '-') + '</span></div>' +
+      '</div>';
+    } else if (l.kind === 'ERROR') {
+      tagClass = 'tag-rose';
+      borderStyle = 'border-left: 3px solid var(--rose);';
+      kindLabel = '❌ 节点通信/执行异常';
+      bodyHtml = '<div style="color:var(--rose);font-size:12px;">' +
+        '组件: <b>[' + (d.key || 'system') + ']</b> · 错误: <b>' + (d.message || JSON.stringify(d)) + '</b>' +
+        '<div style="color:var(--muted);font-size:11px;margin-top:2px;">(节点瞬时抖动时索引器会自动切入热备节点重试)</div>' +
+      '</div>';
+    } else {
+      tagClass = 'tag-retired';
+      kindLabel = l.kind;
+      bodyHtml = '<div class="mono" style="font-size:11.5px;color:var(--muted);">' + JSON.stringify(d) + '</div>';
+    }
+
+    return '<div class="journal-card" style="' + borderStyle + '">' +
+      '<div class="journal-card-top">' +
+        '<span class="tag ' + tagClass + '">' + kindLabel + '</span>' +
+        '<span class="journal-time mono">' + timeStr + '</span>' +
+      '</div>' +
+      '<div class="journal-body">' + bodyHtml + '</div>' +
+    '</div>';
+  }).join('');
+}
+
+document.getElementById('btnRefreshJournal').onclick = () => {
+  refreshAll();
+  showToast('已拉取最新审计流水');
+};
 
 // 2. Node Pool Benchmark
 async function loadNodePoolBenchmark() {
