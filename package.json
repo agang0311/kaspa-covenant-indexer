@@ -1,6 +1,6 @@
 {
   "name": "kaspa-covenant-indexer",
-  "version": "1.0.0",
+  "version": "0.1.1",
   "description": "Kaspa Stateful Covenant Event Indexer, CID REST Service & Admin Studio (SilverScript & Argent)",
   "private": true,
   "type": "module",

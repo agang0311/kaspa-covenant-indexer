@@ -104,6 +104,18 @@ header {
   letter-spacing: 0.6px;
   flex-shrink: 0;
 }
+.version-badge {
+  background: rgba(112, 199, 186, 0.12);
+  border: 1px solid rgba(112, 199, 186, 0.35);
+  color: var(--kaspa);
+  font-size: 11px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  letter-spacing: 0.3px;
+  flex-shrink: 0;
+}
 .brand-title {
   font-size: 14px;
   font-weight: 700;
@@ -568,6 +580,7 @@ input:focus, select:focus, textarea:focus {
       <div class="brand">
         <span class="logo-badge">KCI</span>
         <span class="brand-title">Kaspa Covenant Indexer</span>
+        <span class="version-badge" id="appVersionBadge">v0.1.1</span>
       </div>
       <div class="header-btns">
         <button class="btn btn-header" id="btnRefresh" title="刷新状态">🔄<span class="btn-text"> 刷新</span></button>
@@ -1035,6 +1048,10 @@ async function refreshAll() {
     }
 
     // Top KPI
+    if (data.version) {
+      const elV = document.getElementById('appVersionBadge');
+      if (elV) elV.innerText = data.version.startsWith('v') ? data.version : ('v' + data.version);
+    }
     document.getElementById('statNodeUrl').innerText = (data.activeNode && data.activeNode.url) || '无连接';
     document.getElementById('statNodeDetails').innerText = 
       '版本: ' + (data.activeNode?.serverVersion || '-') + ' | 同步: ' + (data.activeNode?.isSynced ? '是' : '否') + ' | UTXO: ' + (data.activeNode?.hasUtxoIndex ? '已开启' : '未开启');
