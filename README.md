@@ -9,8 +9,8 @@ Kaspa 状态契约（Stateful Covenant）通用事件索引器、CID REST 服务
 - 🔍 **CID REST 查询 API**：为各类前端 DApp / Web 提供高并发、零延迟的契约最新状态只读查询；
 - 🖥️ **Web 控制台 (`/admin`)**：内置现代化暗黑管理面板，支持实时节点连通性测速、节点健康体检、内存/负载监控与合约插件热启停；
 - 🛡️ **纯只读与安全隔离**：链上无私钥、不签名、不广播；管理 API 全面受 Admin Token 认证保护，隔绝越权与注入风险；
-- ⚡ **无持续扫链**：基于 UTXO 通知与针对性 spender 检索，低内存占用（<100MB RSS）与轻量化运算；
-- 📦 **零外部依赖**：已内置 Node.js 22+ 兼容的固定 Kaspa WASM SDK (2.0.1) 与编译后契约规则包。
+- ⚡ **无持续扫链与四级定位漏斗**：基于 UTXO 通知与多级定位漏斗（节点内存池 -> 链尖快道 -> 官方 REST 零信任探针加速 -> 本地窗口切片兜底），实现亚秒级花费者与创世定位，内存占用极低（<100MB RSS）；
+- 📦 **零外部依赖**：已内置 Node.js 22+ 兼容的官方 Kaspa WASM SDK (2.1.0) 与编译后契约规则包。
 
 ---
 
@@ -56,8 +56,8 @@ docker run -d --name kaspa-covenant-indexer \
 适合部署在独立 VPS 或物理机上，脚本会自动创建系统用户、设置数据目录、注册 systemd 服务并开机自启。
 
 ```bash
-git clone https://github.com/agang0311/kaswin-indexer.git
-cd kaswin-indexer
+git clone https://github.com/agang0311/kaspa-covenant-indexer.git
+cd kaspa-covenant-indexer
 
 # 执行一键安装（需要 root / sudo 权限）
 sudo bash install.sh
@@ -86,10 +86,28 @@ systemctl restart kaswin-indexer.service  # 重启服务
 |---|---|---|---|
 | `KASWIN_NODE_URL` | `--url` | 固定单 wRPC 节点地址 | 留空（使用节点池） |
 | `KASWIN_NODE_URLS` | `--urls` | 逗号分隔的双节点地址 | 留空 |
+| `KASWIN_REST_URL` / `KASPA_REST_URL` | `--rest-url` | 官方 REST 定位加速探针 URL（填 `none` 或 `off` 禁用） | `https://api-tn10.kaspa.org` |
+| `ADMIN_TOKEN` | `--admin-token` | Web 管理后台认证令牌（不设置则自动生成并持久化在 SQLite 中） | 自动生成 |
 | `KASWIN_REGISTRY_ADDRESSES` | `--registry-addresses` | 监听的 Registry 地址列表 | 官方 TN10 Registry |
 | `KASWIN_CORS_ORIGIN` | `--cors-origin` | 跨域来源（`*`、具体域名或 `none` 禁用） | `*`（默认允许跨域） |
 | `KASWIN_API_PORT` | `--api-port` | REST API 端口 | `8788` |
 | `KASWIN_API_HOST` | `--api-host` | REST API 监听地址 | `0.0.0.0` |
+
+---
+
+## 核心架构：四级定位漏斗与 REST 零信任线索探针
+
+在 Kaspa GHOSTDAG 体系下，索引器绝不依赖对全链数万个区块的漫无目的轮询。当检测到轮次 Tip 离开 UTXO 集合需要定位后续花费者（Spender）时，流水线按四级漏斗极速收敛：
+
+1. **第一级 · 节点内存池 (`fromMempool`, <5ms)**：
+   若交易刚广播或待入块，直接在连接节点的 Mempool 中秒级提取。
+2. **第二级 · 选定链链尖快道 (`tryFast`, ~50ms)**：
+   若交易在最近的虚拟选定链（VSPC）页面中入块，直接命中 Full Row 完成状态提取。
+3. **第三级 · 官方 REST 零信任探针 (`fromRest`, ~1s)**：
+   若索引器断线重连或追赶跨越数千个区块的历史交易，直接向官方 REST 端点（如 `api-tn10.kaspa.org`）请求合约地址历史，秒级获取花费者 `txid` 与其入块的 `accepting_block_hash`。
+   > **零信任安全规范**：REST 仅提供线索（Hint），绝不作为证据。索引器获取线索后，仍由本地受信节点（wRPC）逐字节校验选定链共识、接受状态与插件状态机转移规则，无法被任何第三方虚假响应投毒。
+4. **第四级 · 内存安全窗口扫描 (`windowFind`, 兜底防线)**：
+   若前三级均未命中，系统启动 96MB 内存隔离的子进程，按蓝色评分窗口逐页向前回溯，确保系统即使在 REST 宕机或无外网环境下仍 100% 具备链上自洽追踪能力。
 
 ---
 

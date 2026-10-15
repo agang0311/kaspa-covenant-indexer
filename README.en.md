@@ -8,8 +8,8 @@ This service tracks on-chain UTXO events, resolves spenders, validates selected-
 - 🔍 **CID REST Service**: Low-latency, CID-keyed REST endpoints for front-end DApps and web applications.
 - 🖥️ **Web Admin Studio (`/admin`)**: Embedded dark-themed management dashboard featuring real-time node latency probing, node health diagnosis, memory/load metrics, and contract plugin hot-toggling.
 - 🛡️ **Read-Only & Secure**: Holds no private keys, signs no transactions, and never broadcasts. Admin endpoints are fully protected by Admin Token authentication.
-- ⚡ **No Continuous Chain Scanning**: Pure event-driven tracking via UTXO subscription notifications and targeted spender hydration, keeping memory usage minimal (<100MB RSS).
-- 📦 **Zero External Monorepo Dependencies**: Self-contained distribution with embedded Kaspa WASM SDK (pinned v2.0.1) and precompiled contract rule packages.
+- ⚡ **No Continuous Chain Scanning & 4-Tier Spender Funnel**: Event-driven tracking through a four-tier locator funnel (Mempool -> Fast VC Page -> Official REST Zero-Trust Hint Oracle -> Bounded Fallback Scan), enabling sub-second spender resolution with minimal memory footprint (<100MB RSS).
+- 📦 **Zero External Monorepo Dependencies**: Self-contained distribution with embedded official Kaspa WASM SDK (pinned v2.1.0) and precompiled contract rule packages.
 
 ---
 
@@ -55,8 +55,8 @@ After ~10–15 seconds (initial pool probing and subscription handshake), verify
 Ideal for standalone Linux servers or VPS instances. The installer automatically handles runtime dependencies, creates a dedicated system user, sets up data directories, and installs a hardened systemd service.
 
 ```bash
-git clone https://github.com/agang0311/kaswin-indexer.git
-cd kaswin-indexer
+git clone https://github.com/agang0311/kaspa-covenant-indexer.git
+cd kaspa-covenant-indexer
 
 # Run installer (requires root or sudo privileges)
 sudo bash install.sh
@@ -85,10 +85,28 @@ Settings can be customized via `.env` environment variables or CLI flags:
 |---|---|---|---|
 | `KASWIN_NODE_URL` | `--url` | Single fixed wRPC node URL (Borsh) | Empty (uses pool) |
 | `KASWIN_NODE_URLS` | `--urls` | Comma-separated dual-node URLs | Empty |
+| `KASWIN_REST_URL` / `KASPA_REST_URL` | `--rest-url` | Official REST accelerator probe URL (`none` or `off` to disable) | `https://api-tn10.kaspa.org` |
+| `ADMIN_TOKEN` | `--admin-token` | Web admin authentication token (auto-generated in SQLite if omitted) | Auto-generated |
 | `KASWIN_REGISTRY_ADDRESSES` | `--registry-addresses` | Watched Kaswin Registry address list | Official TN10 Registry |
 | `KASWIN_CORS_ORIGIN` | `--cors-origin` | Allowed CORS origin (`*`, URL, or `none`) | `*` (open by default) |
 | `KASWIN_API_PORT` | `--api-port` | REST API listening port | `8788` |
 | `KASWIN_API_HOST` | `--api-host` | REST API listening host | `0.0.0.0` |
+
+---
+
+## Architecture: Four-Tier Spender Locator Funnel
+
+Under Kaspa GHOSTDAG, the indexer avoids expensive unbounded block scans. When a covenant tip UTXO is spent, the spender resolution pipeline cascades through four progressive stages:
+
+1. **Tier 1 · Node Mempool (`fromMempool`, <5ms)**:
+   Immediately extracts candidate transactions from the connected node's memory pool.
+2. **Tier 2 · Virtual Selected Parent Chain Fast Path (`tryFast`, ~50ms)**:
+   Matches candidate transactions within recent virtual selected chain pages.
+3. **Tier 3 · Official REST Zero-Trust Hint Oracle (`fromRest`, ~1s)**:
+   Accelerates historical recovery by querying the official REST endpoint (`api-tn10.kaspa.org`) for the contract address history to obtain the spender `txid` and `accepting_block_hash`.
+   > **Zero-Trust Principle**: The REST API provides location hints, never consensus proofs. The indexer strictly verifies selected-chain membership, acceptance status, and contract transition rules through its trusted wRPC node.
+4. **Tier 4 · Bounded Window Fallback (`windowFind`, Fail-Safe)**:
+   Walks historical accepted chain blocks in 96MB memory-isolated worker processes, ensuring full autonomy even if REST is offline or disabled.
 
 ---
 
