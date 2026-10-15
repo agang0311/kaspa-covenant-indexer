@@ -29,14 +29,16 @@ export const DEFAULTS = Object.freeze({
   windowWorkerPages: 200,        // pages per child process (one process = one memory high-water, then returned)
   pendingMaxMs: 15 * 60 * 1000,   // legacy config; uncertain spend work no longer expires
   autoCatchup: true,              // false only for a bounded, single-writer operator replay
+  restUrl: null,                  // Spender hint oracle URL (e.g. 'https://api-tn10.kaspa.org')
 });
 
 export {actionOf} from '../contracts/kaswin-f3.mjs';   // compatibility re-export
 
 export class Engine {
-  constructor({store, contracts, node, addressOf, config = {}, now = () => Date.now(), log = () => {}}) {
+  constructor({store, contracts, node, addressOf, config = {}, now = () => Date.now(), log = () => {}, fetchImpl}) {
     Object.assign(this, {store, contracts, node, addressOf, now, log});
     this.config = {...DEFAULTS, ...config};
+    this.fetchImpl = fetchImpl ?? globalThis.fetch;
     this.subs = new Map();          // address -> refcount
     this.queue = Promise.resolve();
     this.scheduled = new Set();
@@ -306,6 +308,107 @@ export class Engine {
     }
     return [...out.values()];
   }
+  async fromRest(address, tip, cid = null) {
+    if (!this.config.restUrl || !address || !tip) return [];
+    const base = this.config.restUrl.replace(/\/+$/, '');
+    const url = `${base}/addresses/${address}/full-transactions?limit=20`;
+    let list;
+    try {
+      const ac = new AbortController(), t = setTimeout(() => ac.abort(), 3500);
+      t.unref?.();
+      const res = await (this.fetchImpl ?? globalThis.fetch)(url, {signal: ac.signal});
+      clearTimeout(t);
+      if (!res.ok) {
+        this.store.log('REST_HINT_QUERY_FAILED', {address, status: res.status}, this.now());
+        return [];
+      }
+      list = await res.json();
+    } catch (e) {
+      this.store.log('REST_HINT_QUERY_FAILED', {address, message: String(e?.message ?? e).slice(0, 80)}, this.now());
+      return [];
+    }
+    if (!Array.isArray(list)) return [];
+    const out = [];
+    for (const raw of list) {
+      const spendsTip = (raw.inputs || []).some(i =>
+        i.previous_outpoint_hash === tip.transactionId &&
+        Number(i.previous_outpoint_index) === tip.index
+      );
+      if (!spendsTip || !raw.transaction_id) continue;
+      const txid = raw.transaction_id;
+
+      let start = null;
+      if (raw.accepting_block_hash) {
+        try {
+          const h = await this.header(raw.accepting_block_hash);
+          if (h?.isChain) start = h.selectedParent ?? raw.accepting_block_hash;
+        } catch {}
+      }
+
+      const tx = {
+        version: raw.version ?? 0,
+        lockTime: String(raw.lock_time ?? 0),
+        subnetworkId: raw.subnetwork_id ?? '0000000000000000000000000000000000000000',
+        gas: String(raw.gas ?? 0),
+        payload: raw.payload ?? '',
+        inputs: (raw.inputs || []).map(i => ({
+          previousOutpoint: {
+            transactionId: i.previous_outpoint_hash,
+            index: Number(i.previous_outpoint_index)
+          },
+          signatureScript: i.signature_script || '',
+          sequence: String(i.sequence ?? 0),
+          sigOpCount: i.sig_op_count ?? 1
+        })),
+        outputs: (raw.outputs || []).map(o => ({
+          value: String(o.amount ?? 0),
+          scriptPublicKey: typeof o.script_public_key === 'object' && o.script_public_key !== null
+            ? o.script_public_key
+            : {version: 0, script: String(o.script_public_key || '')},
+          verboseData: {
+            scriptPublicKeyAddress: o.script_public_key_address || null
+          }
+        })),
+        verboseData: {
+          transactionId: txid,
+          blockHash: raw.accepting_block_hash || (Array.isArray(raw.block_hash) ? raw.block_hash[0] : null)
+        }
+      };
+
+      out.push({
+        txid,
+        tx,
+        containing: tx.verboseData.blockHash,
+        start,
+        source: 'rest-hint'
+      });
+      this.store.log('REST_HINT_SPENDER_FOUND', {round: cid, txid, accepting: raw.accepting_block_hash}, this.now());
+    }
+    return out;
+  }
+  async genesisFromRest(txid) {
+    if (!this.config.restUrl || !txid) return null;
+    const base = this.config.restUrl.replace(/\/+$/, '');
+    const url = `${base}/transactions/${txid}`;
+    try {
+      const ac = new AbortController(), t = setTimeout(() => ac.abort(), 3500);
+      t.unref?.();
+      const res = await (this.fetchImpl ?? globalThis.fetch)(url, {signal: ac.signal});
+      clearTimeout(t);
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (!data?.is_accepted || !data?.accepting_block_hash) return null;
+      let start = null;
+      try {
+        const h = await this.header(data.accepting_block_hash);
+        if (h?.isChain) start = h.selectedParent ?? data.accepting_block_hash;
+      } catch {}
+      this.store.log('REST_HINT_GENESIS_FOUND', {txid, accepting: data.accepting_block_hash}, this.now());
+      return {acceptingBlockHash: data.accepting_block_hash, start};
+    } catch {
+      return null;
+    }
+  }
   async header(hash) {
     const b = (await this.node.getBlock({hash, includeTransactions: false})).block;
     const returned = b.header?.hash ?? b.verboseData?.hash;
@@ -419,6 +522,9 @@ export class Engine {
       this.store.setMeta(`window-tip:${roundId}`, tipKey);
     }
     let candidates = await this.fromMempool(rec.address, tip, rec.data.cid);
+    if (!candidates.length && this.config.restUrl) {
+      candidates = await this.fromRest(rec.address, tip, rec.data.cid);
+    }
     if (!candidates.length) {
       // Bounded accepted-chain walk (replaces the getBlocks body scan): newest start first, older starts only if needed.
       let failed = 0;
@@ -598,6 +704,10 @@ export class Engine {
     }
     const from = starts ?? this.store.checkpointsBefore(eventAt - this.config.genesisLookbackMs, this.config.checkpointsPerSearch).map(c => c.sink);
     if (!from.length && this.store.getMeta('discoveryScan')?.anchor) from.push(this.store.getMeta('discoveryScan').anchor);
+    if (this.config.restUrl && !starts) {
+      const hint = await this.genesisFromRest(txid);
+      if (hint?.start && !from.includes(hint.start)) from.unshift(hint.start);
+    }
     if (!from.length) return this.defer('genesis:' + txid, {kind: 'genesis', id: txid, hint: {eventAt, daa, starts, contract}}, 'NO_CHECKPOINT');
     const acc = await this.acceptance(txid, from);
     found = acc ? await this.acceptedHigh(txid, acc) : null;

@@ -115,6 +115,10 @@ export async function handleAdmin(req, res, ctx) {
           hasUtxoIndex: activeNode?.hasUtxoIndex ?? true,
           virtualDaaScore: activeNode?.virtualDaaScore?.toString()
         },
+        rest: {
+          url: engine?.config?.restUrl ?? null,
+          enabled: Boolean(engine?.config?.restUrl)
+        },
         nodePool: nodeStatus,
         rounds: {
           total: allRounds.length,
@@ -145,8 +149,47 @@ export async function handleAdmin(req, res, ctx) {
         ok: true,
         seeds: TN10_SEED,
         members,
-        active: node?.identity ?? null
+        active: node?.identity ?? null,
+        rest: {
+          url: engine?.config?.restUrl ?? null,
+          enabled: Boolean(engine?.config?.restUrl)
+        }
       });
+      return true;
+    }
+
+    // Probe REST API endpoint
+    if (sub === '/probe-rest' && req.method === 'POST') {
+      const restUrl = engine?.config?.restUrl;
+      if (!restUrl) {
+        send(200, {ok: false, enabled: false, message: 'REST acceleration is disabled'});
+        return true;
+      }
+      const t0 = performance.now();
+      try {
+        const ac = new AbortController(), t = setTimeout(() => ac.abort(), 4000); t.unref?.();
+        const res = await fetch(`${restUrl.replace(/\/+$/, '')}/info/kaspad`, {signal: ac.signal});
+        clearTimeout(t);
+        const latencyMs = Math.round(performance.now() - t0);
+        if (!res.ok) {
+          send(200, {ok: false, enabled: true, restUrl, error: `HTTP ${res.status}`, latencyMs});
+          return true;
+        }
+        const info = await res.json();
+        send(200, {
+          ok: true,
+          enabled: true,
+          restUrl,
+          latencyMs,
+          serverVersion: info.serverVersion,
+          isSynced: info.isSynced,
+          isUtxoIndexed: info.isUtxoIndexed,
+          mempoolSize: info.mempoolSize,
+          p2pIdHashed: info.p2pIdHashed
+        });
+      } catch (e) {
+        send(200, {ok: false, enabled: true, restUrl, error: String(e?.message ?? e).slice(0, 100), latencyMs: Math.round(performance.now() - t0)});
+      }
       return true;
     }
 

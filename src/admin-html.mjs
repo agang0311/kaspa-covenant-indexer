@@ -694,6 +694,21 @@ input:focus, select:focus, textarea:focus {
       </div>
     </div>
 
+    <!-- REST 辅助加速探针卡片 -->
+    <div class="card" style="border-left:4px solid var(--amber);margin-bottom:16px;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;">
+        <div>
+          <div class="card-label">
+            <span style="color:var(--amber);">⚡ 官方 REST 定位加速探针 (Spender Hint Oracle)</span>
+            <span id="restStatusTag" class="tag tag-active" style="background:rgba(245,158,11,0.15);color:var(--amber);">ENABLED</span>
+          </div>
+          <div class="mono" id="restEndpointUrl" style="font-size:12.5px;font-weight:700;word-break:break-all;">-</div>
+          <div class="card-sub" id="restEndpointSub">角色: 三级极速线索定位探针 · 免深度块回溯 · 100% 由主节点共识复验</div>
+        </div>
+        <button class="btn btn-sm" id="btnProbeRest" style="border:1px solid var(--border);">⚡ 探测 REST 探针状态</button>
+      </div>
+    </div>
+
     <!-- 候选节点池列表 -->
     <div class="card" style="padding:0;overflow:hidden;margin-bottom:16px;">
       <div style="padding:12px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;">
@@ -1061,6 +1076,19 @@ async function refreshAll() {
       document.getElementById('dualStandbySub').innerHTML = '运行状态: ' + (stby.up ? '<b style="color:var(--emerald);">● 热备就绪中</b>' : '<b style="color:var(--rose);">○ 掉线重连中</b>') + ' | 重试: ' + stby.attempts + ' 次';
     }
 
+    // Update REST Hint Card in Tab 2
+    if (data.rest) {
+      const elUrl = document.getElementById('restEndpointUrl');
+      const elTag = document.getElementById('restStatusTag');
+      const elSub = document.getElementById('restEndpointSub');
+      if (elUrl) elUrl.innerText = data.rest.url || '未配置 / 已禁用';
+      if (elTag) {
+        elTag.innerText = data.rest.enabled ? 'ENABLED' : 'DISABLED';
+        elTag.style.background = data.rest.enabled ? 'rgba(245,158,11,0.15)' : 'rgba(100,116,139,0.15)';
+        elTag.style.color = data.rest.enabled ? 'var(--amber)' : 'var(--muted)';
+      }
+    }
+
     // Overview Contract Summary
     const cTbody = document.getElementById('tblContractSummary');
     const contractsList = data.contracts || [];
@@ -1230,6 +1258,29 @@ async function loadNodePoolBenchmark() {
 }
 
 document.getElementById('btnBenchmarkPool').onclick = loadNodePoolBenchmark;
+
+// REST Hint Probe
+document.getElementById('btnProbeRest').onclick = async () => {
+  const btn = document.getElementById('btnProbeRest');
+  const sub = document.getElementById('restEndpointSub');
+  btn.disabled = true;
+  btn.innerText = '正在握手 REST...';
+  try {
+    const res = await api('/probe-rest', 'POST', {});
+    if (res.ok) {
+      sub.innerHTML = '延迟: <b style="color:var(--emerald);">' + res.latencyMs + 'ms</b> · 版本: <b class="mono">' + res.serverVersion + '</b> · 同步: <b>' + (res.isSynced ? '🟢 已同步' : '🟡 同步中') + '</b> · UTXO索引: <b>' + (res.isUtxoIndexed ? '已开启' : '未开启') + '</b> · 内存池: <b>' + res.mempoolSize + ' 笔</b>';
+      showToast('REST 探针在线 (RTT: ' + res.latencyMs + 'ms)', 'var(--emerald)');
+    } else {
+      sub.innerHTML = '<span style="color:var(--rose);">探测异常: ' + (res.error || res.message || '失败') + ' (RTT: ' + (res.latencyMs || '-') + 'ms)</span>';
+      showToast('REST 探针连接失败', 'var(--rose)');
+    }
+  } catch (err) {
+    sub.innerHTML = '<span style="color:var(--rose);">探测错误: ' + err.message + '</span>';
+  } finally {
+    btn.disabled = false;
+    btn.innerText = '⚡ 探测 REST 探针状态';
+  }
+};
 
 window.probeSingle = function(url) {
   document.getElementById('inputProbeUrl').value = url;

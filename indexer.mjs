@@ -29,6 +29,7 @@ const {values: cli, positionals: [cmd = 'run', ...rest]} = parseArgs({allowPosit
   'api-port': {type: 'string'}, 'api-host': {type: 'string', default: '127.0.0.1'}, 'cors-origin': {type: 'string', default: '*'},
   'checkpoint-ms': {type: 'string', default: '3000'}, 'reconcile-ms': {type: 'string', default: '60000'},
   'finality-blue-score': {type: 'string', default: '600'},
+  'rest-url': {type: 'string'},
 }});
 const o = runtimeOptions(cli);
 const log = (kind, ...a) => console.log(JSON.stringify({at: new Date().toISOString(), kind, detail: a.length === 1 ? a[0] : a}, (_, v) => typeof v === 'bigint' ? v.toString() : v));
@@ -80,7 +81,7 @@ if (o.pool) {
 } else if (o.urls) node = await openDualNode({urls: o.urls.split(',').map(s => s.trim()), log, open: openMember});
 else node = await openNode(sdk, {network, url: o.url ?? null, resolverUrls: o.resolver ? o.resolver.split(',') : null, log});
 const engine = new Engine({store, contracts, node, addressOf: addressOfFactory(sdk, network), log,
-  config: {network, finalityBlueScore: BigInt(o['finality-blue-score'])}});
+  config: {network, finalityBlueScore: BigInt(o['finality-blue-score']), restUrl: o.restUrl}});
 node.on('utxos', data => engine.onUtxosChanged(data));
 node.on('chain', removed => engine.onChainChanged(removed));
 

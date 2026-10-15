@@ -20,5 +20,12 @@ export function runtimeOptions(cli, env = process.env) {
   if (cors !== undefined) out['cors-origin'] = cors;
   const adminToken = cli['admin-token'] ?? env.KASPA_INDEXER_ADMIN_TOKEN ?? env.ADMIN_TOKEN;
   if (adminToken !== undefined) out['admin-token'] = adminToken;
+  const rest = cli['rest-url'] ?? env.KASWIN_REST_URL ?? env.KASPA_REST_URL;
+  if (rest !== undefined) {
+    if (rest === 'none' || rest === 'false' || rest === 'off') out.restUrl = null;
+    else out.restUrl = rest;
+  } else {
+    out.restUrl = 'https://api-tn10.kaspa.org';
+  }
   return out;
 }
