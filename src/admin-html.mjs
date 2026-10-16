@@ -659,6 +659,22 @@ input:focus, select:focus, textarea:focus {
       </div>
     </div>
 
+    <!-- 🎯 任意阶段交易全链路追溯与补录卡片 -->
+    <div class="card" style="border-left:4px solid var(--kaspa);margin-bottom:16px;">
+      <div class="card-label">
+        <span style="color:var(--kaspa);">🎯 任意阶段交易全链路追溯与补录 (Universal TXID Tracer)</span>
+        <span class="tag tag-active">ANY STAGE & DEDUP</span>
+      </div>
+      <div class="section-desc" style="margin-bottom:12px;font-size:12px;">
+        输入合约生命周期中<strong>任意阶段的交易哈希 (TXID)</strong>（无论是创世 GENESIS、购买 BUY、封盘 CLOSE、开奖 DRAW 还是退款 REFUND）。系统将智能沿链回溯至创世、核验当前状态、与已有 Covenant ID (CID) 比对去重，并由索引器全自动追溯补齐。
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <input type="text" id="inputTraceTxid" class="mono" style="flex:1;min-width:240px;height:36px;" placeholder="输入任意阶段 64 位十六进制交易哈希 (TXID)...">
+        <button class="btn btn-pri" id="btnTraceTxid" style="white-space:nowrap;height:36px;">🔍 智能追溯与去重核验</button>
+      </div>
+      <div id="traceResultBox" style="display:none;margin-top:12px;"></div>
+    </div>
+
     <div class="grid-2col">
       <!-- 双节点状态速览 -->
       <div class="card" style="padding:0;overflow:hidden;">
@@ -1302,6 +1318,61 @@ document.getElementById('btnRecheckDiscoveries').onclick = async () => {
   } finally {
     btn.disabled = false;
     btn.innerText = '⚡ 重新复审历史创世并自动追块';
+  }
+};
+
+// Universal TXID Tracer Handler
+document.getElementById('btnTraceTxid').onclick = async () => {
+  const input = document.getElementById('inputTraceTxid');
+  const box = document.getElementById('traceResultBox');
+  const btn = document.getElementById('btnTraceTxid');
+  const txid = input.value.trim();
+  if (!txid) {
+    showToast('请输入交易哈希 TXID', 'var(--rose)');
+    return;
+  }
+  btn.disabled = true;
+  btn.innerText = '正在沿链追溯与去重核验...';
+  box.style.display = 'block';
+  box.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:8px 0;">正在连接节点与 REST 进行跨状态回溯与 CID 去重比对...</div>';
+
+  try {
+    const res = await api('/track', 'POST', {txid});
+    const isNew = res.status === 'TRACKED_NEW';
+    const tagClass = isNew ? 'tag-active' : 'tag-standby';
+    const tagText = isNew ? '⚡ 发现新契约并启动追块' : '✓ 已收录 (CID 比对去重)';
+    const borderColor = isNew ? 'var(--kaspa)' : 'var(--indigo)';
+
+    let fieldsHtml = '';
+    if (res.cid) fieldsHtml += '<div class="journal-field"><span class="journal-field-label">Covenant ID:</span><span class="journal-field-val mono"><b>' + res.cid.slice(0, 16) + '...</b></span></div>';
+    if (res.genesisTxid) fieldsHtml += '<div class="journal-field"><span class="journal-field-label">创世 TXID:</span><span class="journal-field-val mono">' + res.genesisTxid.slice(0, 16) + '...</span></div>';
+    if (res.contract) fieldsHtml += '<div class="journal-field"><span class="journal-field-label">契约版本:</span><span class="journal-field-val mono">' + res.contract + '</span></div>';
+    if (res.phase !== undefined && res.phase !== null) fieldsHtml += '<div class="journal-field"><span class="journal-field-label">当前阶段:</span><span class="journal-field-val">Phase ' + res.phase + '</span></div>';
+    if (res.terminal) fieldsHtml += '<div class="journal-field"><span class="journal-field-label">终局状态:</span><span class="journal-field-val" style="color:var(--kaspa);font-weight:700;">' + res.terminal + '</span></div>';
+    if (res.transitionsCount !== undefined) fieldsHtml += '<div class="journal-field"><span class="journal-field-label">已记录转移:</span><span class="journal-field-val">' + res.transitionsCount + ' 笔</span></div>';
+
+    box.innerHTML = '<div class="card" style="background:var(--bg-panel-elevated);border-color:' + borderColor + ';padding:14px;box-sizing:border-box;max-width:100%;overflow:hidden;">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:6px;">' +
+        '<span class="tag ' + tagClass + '">' + tagText + '</span>' +
+        '<span class="mono" style="font-size:11.5px;color:var(--muted);">' + (res.traceHops ? ('回溯跨越 ' + res.traceHops + ' 阶状态') : '即时命中') + '</span>' +
+      '</div>' +
+      '<div style="font-size:12.5px;line-height:1.7;margin-bottom:8px;word-break:break-all;">' + res.message + '</div>' +
+      '<div class="journal-grid" style="font-size:12px;background:var(--bg-card);padding:10px;border-radius:var(--radius-sm);">' +
+        fieldsHtml +
+      '</div>' +
+    '</div>';
+
+    showToast(isNew ? '已成功收录并启动追块！' : '该轮次已收录（去重完成）', 'var(--emerald)');
+    setTimeout(refreshAll, 1500);
+  } catch (err) {
+    box.innerHTML = '<div class="card" style="border-color:var(--rose);background:rgba(239,68,68,0.1);padding:12px;">' +
+      '<strong style="color:var(--rose);">❌ 追溯失败</strong>' +
+      '<div style="font-size:12px;margin-top:4px;color:var(--text);word-break:break-all;">' + err.message + '</div>' +
+    '</div>';
+    showToast('追溯失败: ' + err.message, 'var(--rose)');
+  } finally {
+    btn.disabled = false;
+    btn.innerText = '🔍 智能追溯与去重核验';
   }
 };
 

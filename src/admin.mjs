@@ -8,6 +8,7 @@ import {loadContracts} from './contracts.mjs';
 import {compileSilverScript} from './compiler.mjs';
 import {generatePluginCode} from './generator.mjs';
 import {TN10_SEED} from './node-pool.mjs';
+import {traceAndTrackTxid} from './tracer.mjs';
 
 export function verifyAdminToken(req, expectedToken) {
   if (!expectedToken) return false;
@@ -225,24 +226,29 @@ export async function handleAdmin(req, res, ctx) {
       return true;
     }
 
-    // Manual / Targeted Track Genesis TXID
+    // Universal TXID Tracer & Catch-Up (Accepts ANY stage: Genesis, BUY, CLOSE, REFUND, DRAW)
     if (sub === '/track' && req.method === 'POST') {
-      const body = await readBody(req).catch(() => ({}));
-      const txid = body?.txid?.trim();
-      if (!txid || !/^[0-9a-f]{64}$/i.test(txid)) {
-        send(400, {ok: false, error: 'INVALID_TXID', detail: '请输入合法的 64 位十六进制 Genesis 交易哈希'});
-        return true;
+      try {
+        const body = await readBody(req).catch(() => ({}));
+        const txid = body?.txid?.trim();
+        const restUrl = engine?.config?.restUrl;
+        const result = await traceAndTrackTxid(txid, {
+          store,
+          engine,
+          restUrl,
+          now: () => Date.now()
+        });
+        send(200, {
+          ok: true,
+          ...result
+        });
+      } catch (err) {
+        send(400, {
+          ok: false,
+          error: 'TRACK_FAILED',
+          detail: err.message
+        });
       }
-      store.discoverTask(txid, {eventAt: Date.now()}, Date.now());
-      store.db.prepare("UPDATE discoveries SET status='PENDING', error=NULL WHERE txid=?").run(txid);
-      if (engine && typeof engine.retryPending === 'function') {
-        engine.retryPending();
-      }
-      send(200, {
-        ok: true,
-        txid,
-        message: `已提交给索引器，后台已自动启动追块与花费者追踪`
-      });
       return true;
     }
 
