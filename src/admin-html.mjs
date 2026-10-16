@@ -1185,7 +1185,8 @@ function renderJournalFeed(logs) {
     return;
   }
 
-  container.innerHTML = logs.map(l => {
+  const seenDiscoveryTxids = new Set();
+  const rendered = logs.map(l => {
     const timeStr = new Date(l.at).toLocaleTimeString();
     const d = l.data || l.detail || {};
 
