@@ -807,6 +807,9 @@ export class Engine {
     const strip = rows => rows.map(({verboseData, ...rest}) => rest);
     for (const k of Object.keys(high)) {
       if (k === 'verboseData') continue;
+      // V2 High row does not carry version and lockTime (they are null); hydrate() explicitly exists to fetch
+      // them from the containing block body. Do not reject when high lacks them.
+      if ((k === 'version' || k === 'lockTime') && high[k] == null) continue;
       const a = k === 'inputs' ? strip(high[k]) : high[k], b = k === 'inputs' ? strip(full[k]) : full[k];
       if (JSON.stringify(a) !== JSON.stringify(b)) throw Error('HIGH_FULL_MISMATCH_' + k);
     }
