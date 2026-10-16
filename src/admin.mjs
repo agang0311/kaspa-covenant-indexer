@@ -61,6 +61,18 @@ export async function handleAdmin(req, res, ctx) {
     const v = raw != null ? networks.find(x => x.key === raw) : networks[0];
     return {...v, network: v.networkId, networkId: v.networkId};
   };
+  /**
+   * Hot reload a view's contracts from disk. Uses the VIEW's network context (key + genesis + registry), so a reload
+   * can never silently load another network's registry address. Never gated on an SDK: the address codec is pure JS.
+   */
+  const reloadContracts = async view => {
+    const newContracts = await loadContracts(contractsPath, {
+      network: view.key ?? undefined,
+      networkGenesis: view.genesis ?? undefined,
+    });
+    if (view.engine) view.engine.contracts = newContracts;
+    return newContracts;
+  };
   const url = new URL(req.url, 'http://localhost');
   const pathname = url.pathname;
 
@@ -450,16 +462,23 @@ export async function handleAdmin(req, res, ctx) {
       return true;
     }
 
-    // 3. Get Plugins
+    // 3. Get Plugins (read-only, open). Reports the EFFECTIVE runtime configuration per network view.
     if (sub === '/plugins' && req.method === 'GET') {
       let rawConfig = [];
       if (contractsPath && fs.existsSync(contractsPath)) {
         try { rawConfig = JSON.parse(fs.readFileSync(contractsPath, 'utf8')).contracts || []; } catch {}
       }
+      const view = pickView(url.searchParams.get('network'));
+      if (!view) { send(400, {ok: false, error: 'UNKNOWN_NETWORK', networks: viewKeys}); return true; }
       send(200, {
         ok: true,
         contractsPath,
-        plugins: (engine?.contracts || contracts)?.describe() || [],
+        network: view.networkId,
+        networkKey: view.key ?? null,
+        networks: viewKeys.length ? viewKeys : null,
+        // What is loaded and RUNNING right now (registry address already resolved for this network).
+        plugins: (view.engine?.contracts || view.contracts)?.describe() || [],
+        // What the config FILE says. Some entries may be inert for the current plugin (see `configurable`).
         config: rawConfig
       });
       return true;
@@ -486,17 +505,17 @@ export async function handleAdmin(req, res, ctx) {
         fs.writeFileSync(tmp, JSON.stringify(raw, null, 2) + '\n');
         fs.renameSync(tmp, contractsPath);
 
-        // Hot reload contracts if possible
-        if (engine && sdk) {
-          const newContracts = await loadContracts(contractsPath, {sdk, network});
-          engine.contracts = newContracts;
-          log('PLUGINS_RELOADED', newContracts.describe());
-        }
+        // Hot reload contracts for the SELECTED network view (fail closed, never another network's registry).
+        const view = pickView(url.searchParams.get('network'));
+        if (!view) { send(400, {ok: false, error: 'UNKNOWN_NETWORK', networks: viewKeys}); return true; }
+        const newContracts = await reloadContracts(view);
+        log('PLUGINS_RELOADED', {network: view.key, plugins: newContracts.describe()});
 
         send(200, {
           ok: true,
           message: 'Plugin status updated',
-          plugins: engine?.contracts ? engine.contracts.describe() : []
+          network: view.networkId,
+          plugins: newContracts.describe()
         });
       } catch (err) {
         send(500, {ok: false, error: err.message});
@@ -532,24 +551,25 @@ export async function handleAdmin(req, res, ctx) {
         fs.writeFileSync(tmp, JSON.stringify(raw, null, 2) + '\n');
         fs.renameSync(tmp, contractsPath);
 
-        // Hot reload contracts if possible
-        if (engine && sdk) {
-          const newContracts = await loadContracts(contractsPath, {sdk, network});
-          engine.contracts = newContracts;
-          for (const a of newContracts.watchAddresses()) {
-            try { await engine.subscribe(a); } catch {}
-          }
-          log('PLUGIN_CONFIG_UPDATED', {
-            index,
-            plugin: raw.contracts[index].module,
-            watchAddresses: newContracts.watchAddresses()
-          });
+        // Hot reload for the SELECTED network view, then (re)subscribe that view's registry addresses.
+        const view = pickView(url.searchParams.get('network'));
+        if (!view) { send(400, {ok: false, error: 'UNKNOWN_NETWORK', networks: viewKeys}); return true; }
+        const newContracts = await reloadContracts(view);
+        for (const a of newContracts.watchAddresses()) {
+          try { await view.engine.subscribe(a); } catch {}
         }
+        log('PLUGIN_CONFIG_UPDATED', {
+          network: view.key,
+          index,
+          plugin: raw.contracts[index].module,
+          watchAddresses: newContracts.watchAddresses()
+        });
 
         send(200, {
           ok: true,
           message: 'Plugin configuration updated and reloaded',
-          plugins: engine?.contracts ? engine.contracts.describe() : [],
+          network: view.networkId,
+          plugins: newContracts.describe(),
           config: raw.contracts
         });
       } catch (err) {
@@ -588,20 +608,21 @@ export async function handleAdmin(req, res, ctx) {
           }
         } catch {}
 
-        // Hot reload contracts into running engine
-        if (engine && sdk) {
-          const newContracts = await loadContracts(contractsPath, {sdk, network});
-          engine.contracts = newContracts;
-          log('PLUGIN_REMOVED_AND_RELOADED', {
-            removed: removedEntry.module,
-            remaining: newContracts.describe()
-          });
-        }
+        // Hot reload into the SELECTED network view.
+        const view = pickView(url.searchParams.get('network'));
+        if (!view) { send(400, {ok: false, error: 'UNKNOWN_NETWORK', networks: viewKeys}); return true; }
+        const newContracts = await reloadContracts(view);
+        log('PLUGIN_REMOVED_AND_RELOADED', {
+          network: view.key,
+          removed: removedEntry.module,
+          remaining: newContracts.describe()
+        });
 
         send(200, {
           ok: true,
           message: 'Plugin successfully removed and unloaded',
-          plugins: engine?.contracts ? engine.contracts.describe() : [],
+          network: view.networkId,
+          plugins: newContracts.describe(),
           config: raw.contracts
         });
       } catch (err) {
@@ -735,28 +756,29 @@ export async function handleAdmin(req, res, ctx) {
         fs.writeFileSync(tmpConfig, JSON.stringify(rawConfig, null, 2) + '\n', 'utf8');
         fs.renameSync(tmpConfig, contractsPath);
 
-        // Hot reload contracts into running engine and subscribe to new registry addresses
-        if (engine && sdk) {
-          const newContracts = await loadContracts(contractsPath, {sdk, network});
-          engine.contracts = newContracts;
-          for (const a of newContracts.watchAddresses()) {
-            try { await engine.subscribe(a); } catch {}
-          }
-          log('PLUGIN_INSTALLED_AND_RELOADED', {
-            filename,
-            sha256,
-            active: activate,
-            watchAddresses: newContracts.watchAddresses(),
-            plugins: newContracts.describe()
-          });
+        // Hot reload into the SELECTED network view and subscribe its new registry addresses.
+        const view = pickView(url.searchParams.get('network'));
+        if (!view) { send(400, {ok: false, error: 'UNKNOWN_NETWORK', networks: viewKeys}); return true; }
+        const newContracts = await reloadContracts(view);
+        for (const a of newContracts.watchAddresses()) {
+          try { await view.engine.subscribe(a); } catch {}
         }
+        log('PLUGIN_INSTALLED_AND_RELOADED', {
+          network: view.key,
+          filename,
+          sha256,
+          active: activate,
+          watchAddresses: newContracts.watchAddresses(),
+          plugins: newContracts.describe()
+        });
 
         send(200, {
           ok: true,
           message: 'Plugin successfully installed and loaded into indexer',
+          network: view.networkId,
           filename,
           sha256,
-          plugins: engine?.contracts ? engine.contracts.describe() : []
+          plugins: newContracts.describe()
         });
       } catch (err) {
         send(500, {ok: false, error: 'PLUGIN_INSTALL_FAILED', detail: err.message});

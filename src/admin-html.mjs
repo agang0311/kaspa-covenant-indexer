@@ -979,7 +979,7 @@ input:focus, select:focus, textarea:focus {
     <div style="background:var(--bg-panel-elevated);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:12px;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;flex-wrap:wrap;gap:4px;">
         <span style="font-weight:700;font-size:12px;color:var(--kaspa);">📡 创世监听与注册表配置 (Genesis Discovery)</span>
-        <button class="btn btn-sm" type="button" onclick="document.getElementById('cfgRegistryAddr').value='kaspatest:qztrjpfpuf6g9jw76e6ay909z43hndpv5maqkker6ur4enz7llarsh82ezggl'">填入官方 TN10 Registry</button>
+        <button class="btn btn-sm" type="button" id="btnFillRegistry">填入当前网络官方 Registry</button>
       </div>
       <div class="grid-2col" style="margin-bottom:0;">
         <div>
@@ -1598,21 +1598,55 @@ window.openPluginConfigModal = function(idx) {
   const cfg = data.config[idx] || {};
   const p = (data.plugins || []).find(x => x.module === cfg.module || x.module === './' + cfg.module) || data.plugins[idx] || {};
   const opts = cfg.options || {};
+  // EFFECTIVE runtime config of the running plugin (registry already resolved for the selected network).
+  const eff = p.config || {};
+  const configurable = Array.isArray(p.configurable) ? p.configurable : null;
+  const inert = k => configurable && !configurable.includes(k);
 
   document.getElementById('cfgModalPluginKey').innerText = p.key || (opts.id + '@' + (opts.version || '1.0.0'));
   document.getElementById('cfgActiveToggle').checked = !cfg.retired;
 
-  document.getElementById('cfgRegistryAddr').value = (opts.registryAddresses || []).join(', ');
-  document.getElementById('cfgRegSompi').value = opts.registrationSompi || '5000000';
-  document.getElementById('cfgReqDeposit').value = opts.requiredDeposit || '';
+  // Registry address: ALWAYS show what the running plugin actually watches (per-network, injected). Never a TN10 default.
+  const effRegistry = eff.registryAddresses || [];
+  const effNetwork = eff.network || data.networkKey || null;
+  document.getElementById('cfgRegistryAddr').value = (effRegistry.length ? effRegistry : (opts.registryAddresses || [])).join(', ');
+  // The "fill official registry" button must use THIS network's registry, not a hardcoded TN10 constant.
+  const fillBtn = document.getElementById('btnFillRegistry');
+  if (fillBtn) fillBtn.onclick = () => { if (effRegistry.length) document.getElementById('cfgRegistryAddr').value = effRegistry.join(', '); };
+  const regLabel = document.querySelector('label[for="cfgRegistryAddr"]') || document.getElementById('cfgRegistryAddr').previousElementSibling;
+  if (regLabel) regLabel.innerText = '监听的注册表地址 (逗号分隔)' + (effNetwork ? ' · 当前网络: ' + effNetwork : '');
+  // Registration fee: prefer the effective value over the stale file default.
+  document.getElementById('cfgRegSompi').value = eff.registrationSompi ?? opts.registrationSompi ?? '5000000';
+  document.getElementById('cfgReqDeposit').value = eff.requiredDeposit ?? opts.requiredDeposit ?? '';
   document.getElementById('cfgAllowedCreators').value = (opts.allowedCreators || []).join(', ');
+  // Mark fields the current plugin does NOT read, so an operator never believes they are in effect.
+  for (const [id, key] of [['cfgReqDeposit', 'requiredDeposit'], ['cfgAllowedCreators', 'allowedCreators']]) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    const row = el.closest('div');
+    if (!row) continue;
+    let note = row.querySelector('.inert-note');
+    if (inert(key)) {
+      if (!note) { note = document.createElement('div'); note.className = 'inert-note'; note.style.cssText = 'font-size:10.5px;color:var(--amber);margin-top:2px;'; row.appendChild(note); }
+      note.innerText = '⚠ 当前插件不读取此项，仅保留在配置文件中';
+    } else if (note) note.remove();
+  }
 
   // Render dynamic field guards
   const listEl = document.getElementById('cfgDynamicFieldsList');
   let guards = opts.initialStateGuards || {};
-  
-  // If not configured, check if it's a Kaswin contract and offer auto-prefill
+  // V2.0.2 verifies the canonical genesis ledger against the pinned core itself (verifyGenesisAnnouncement +
+  // validateLedger), so operator-supplied state guards are NOT read. Show the pinned truth instead of a fake form.
   const isKaswin = (cfg.module?.toLowerCase().includes('kaswin') || opts.id?.toLowerCase().includes('kaswin') || p.key?.toLowerCase().includes('kaswin'));
+  if (isKaswin && inert('initialStateGuards')) {
+    listEl.innerHTML = '<div style="color:var(--kaswin,var(--kaspa));font-size:11.5px;line-height:1.7;padding:8px 10px;background:rgba(0,0,0,0.25);border:1px solid var(--border);border-radius:var(--radius-sm);">' +
+      '<strong>创世状态由合约固定校验，无需配置</strong><br>' +
+      'V2.0.2 在链上验证创世账本：Profile <span class="mono">' + (eff.profileId || p.profileId || '').slice(0, 16) + '…</span>，' +
+      '规范初始状态（phase=1, sold=0, purchaseCount=0, cursor=0）与 config（ticketPrice/ticketCap/minTickets/purchaseCap）' +
+      '均由 <span class="mono">verifyGenesisAnnouncement</span> 逐字节校验；不符合的创世会被判为不匹配。' +
+      '</div>';
+    return;
+  }
   if (isKaswin && (!guards || !Object.keys(guards).length)) {
     guards = {
       phase: '1',

@@ -98,6 +98,22 @@ export async function create(options = {}, {sdk, network} = {}) {
   };
   return {id: 'kaswin-v2.0.2', version: profile.id.slice(0, 16), profileId: profile.id, contractVersion: CONTRACT_VERSION,
     network: o.network, networkGenesis: o.networkGenesis, coreSha256: digest,
+    // EFFECTIVE runtime configuration. The registry address is injected per network (never a UI default), so this is
+    // the only place that truthfully reports what the running plugin actually watches.
+    config: {
+      network: o.network,
+      networkGenesis: o.networkGenesis,
+      registryAddresses: [...watch],
+      registrationSompi: REGISTRATION_SOMPI,
+      requiredDeposit: String(S.DEPOSIT),
+      profileId: profile.id,
+      contractVersion: CONTRACT_VERSION,
+      coreSha256: digest,
+      repoDir: o.repoDir,
+    },
+    // Options this plugin actually reads. Anything else in the config file is inert for V2.0.2 and the UI must not
+    // present it as if it were in effect.
+    configurable: ['registryAddresses', 'registrationSompi'],
     watchAddresses: () => [...watch],
     discover: u => u.address && watch.has(u.address) && u.amount === fee && u.outpoint.index === 1 && (!u.covenantId || u.covenantId === S.ZERO) ? u.outpoint.transactionId : null,
     candidateGenesis: tx => typeof tx?.payload === 'string' && tx.payload.startsWith(prefix),

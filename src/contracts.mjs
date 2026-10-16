@@ -59,7 +59,8 @@ export class ContractRegistry {
   /** Only plugins still accepting new rounds are asked about Genesis; retired ones still verify their old rounds. */
   forGenesis(only = null) { return this.all().filter(p => (only ? p.key === only || p.id === only : !p.retired)); }
   watchAddresses() { return [...new Set(this.all().filter(p => !p.retired).flatMap(p => p.watchAddresses()))]; }
-  describe() { return this.all().map(p => ({key: p.key, profileId: p.profileId ?? null, retired: !!p.retired, module: p.module ?? null, moduleSha256: p.moduleSha256 ?? null})); }
+  describe() { return this.all().map(p => ({key: p.key, profileId: p.profileId ?? null, retired: !!p.retired, module: p.module ?? null, moduleSha256: p.moduleSha256 ?? null,
+    network: p.network ?? null, networkGenesis: p.networkGenesis ?? null, config: p.config ?? null, configurable: p.configurable ?? null})); }
 }
 
 /**

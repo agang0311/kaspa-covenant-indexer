@@ -3,7 +3,7 @@
   "contracts": [
     {
       "module": "kaswin-v202.mjs",
-      "sha256": "27c888be353c760ec25976879257dd332dc8108d1287836cca4e2db0c9310273",
+      "sha256": "b54a5382967688f60bd6068c3b601148ab2037a25a30c9fc94c0b371b1e61b5a",
       "retired": false,
       "options": {
         "profileId": "ed0387c9e77bb4e0a8f1f4654a326c316d83663f455283ec6a046a095c94856d",
