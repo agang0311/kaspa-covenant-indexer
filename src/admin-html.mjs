@@ -1241,7 +1241,7 @@ function renderJournalFeed(logs) {
       kindLabel = '⚪ 忽略其他版本创世 (Unmatched Genesis)';
       const reasonText = d.reason === 'no pinned creation template matched' ? 'Profile 版本指纹不属于当前活动契约' : (d.reason || '模版不匹配');
       const rejText = Array.isArray(d.rejected) ? d.rejected.map(r => (r.contract ? r.contract.slice(0, 24) + '...' : '契约') + ': ' + (r.reason || '不匹配')).join('; ') : '';
-      const btnTrack = d.txid ? ('<div style="margin-top:8px;"><button class="btn btn-sm" style="padding:3px 10px;font-size:11px;" onclick="trackGenesis(\'' + d.txid + '\')">🎯 让索引器自动追此轮</button></div>') : '';
+      const btnTrack = d.txid ? ('<div style="margin-top:8px;"><button class="btn btn-sm" style="padding:3px 10px;font-size:11px;" onclick="trackGenesis(&quot;' + d.txid + '&quot;)">🎯 让索引器自动追此轮</button></div>') : '';
       bodyHtml = '<div class="journal-grid">' +
         '<div class="journal-field"><span class="journal-field-label">创世 TXID:</span><span class="journal-field-val mono">' + (d.txid ? d.txid.slice(0, 16) + '...' : '-') + '</span></div>' +
         '<div class="journal-field"><span class="journal-field-label">过滤说明:</span><span class="journal-field-val" style="color:var(--muted);">' + reasonText + '</span></div>' +
