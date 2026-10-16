@@ -1,9 +1,23 @@
 {
-  "_comment": "default.json + contract V2.0.1 (Profile 78c11314). Requires a local snapshot with contracts/V2.0.1 and scripts/V2.0.1 (KASWIN_V201_REPO or references/kaswin-v201). Deployed on .201 only.",
+  "_comment": "default.json + contract V2.0.2 (Profile ed0387c9) & V2.0.1 (Profile 78c11314). Deployed on .201 only.",
   "contracts": [
     {
-      "module": "kaswin-v2.mjs",
+      "module": "kaswin-v202.mjs",
+      "sha256": "cd000b5dc6f9e2ce7c5db4703dc9f9ee2be0630b09f96545c17d83df488ec35b",
       "retired": false,
+      "options": {
+        "profileId": "ed0387c9e77bb4e0a8f1f4654a326c316d83663f455283ec6a046a095c94856d",
+        "networkGenesis": "f896a3034873be1739fc4359236899fd3d65d2bc94f9780df0d0da3eb1cc4370",
+        "registryAddresses": [
+          "kaspatest:qztrjpfpuf6g9jw76e6ay909z43hndpv5maqkker6ur4enz7llarsh82ezggl"
+        ],
+        "registrationSompi": "20000000",
+        "coreSha256": "d62b430c0a8738dfa910403119f994433e8db8cdbc820ee02e357ed611649da8"
+      }
+    },
+    {
+      "module": "kaswin-v2.mjs",
+      "retired": true,
       "options": {
         "profileId": "7aaf76fe5e2180070290ff984bebaef54e41093e6a77eef24f2b48fb64c159c8",
         "networkGenesis": "f896a3034873be1739fc4359236899fd3d65d2bc94f9780df0d0da3eb1cc4370",
@@ -16,7 +30,7 @@
     {
       "module": "kaswin-v201.mjs",
       "sha256": "a72d8570ade095683b65917fd3f3b9eb5649f42c90a41413a7c9b938e6125f1e",
-      "retired": false,
+      "retired": true,
       "options": {
         "profileId": "78c11314f95531345fb6f8614d4d628e2dbfac3429b7c9e37f4161a3a40907f7",
         "networkGenesis": "f896a3034873be1739fc4359236899fd3d65d2bc94f9780df0d0da3eb1cc4370",

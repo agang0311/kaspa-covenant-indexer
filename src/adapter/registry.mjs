@@ -14,17 +14,15 @@ export function registryScope(sdk,addresses){
  });
 }
 const wireSpk=p=>typeof p==='string'?p:/^[0-9a-f]*$/.test(p?.script??'')&&Number.isInteger(p?.version)&&p.version>=0&&p.version<=65535?p.version.toString(16).padStart(4,'0').match(/../g).reverse().join('')+p.script:null;
-export function registrationOf(tx,scope,ownerKey){
+export function registrationOf(tx,scope,ownerKey,amountSompi=REGISTRATION_SOMPI){
+ if(!/^[1-9][0-9]*$/.test(amountSompi))throw Error('REGISTRATION_AMOUNT');
  const outputs=tx.outputs??[];
- // Only the canonical payment slot is accepted. A lookalike payment elsewhere
- // is not F3.1 registration. Genesis/profile/consensus must be checked separately.
  const o=outputs[1],spk=o?.scriptPublicKey;
- // F3.1 canonical builder produces only Genesis + registration + optional owner change.
  if(outputs.length!==2&&outputs.length!==3)return null;
  if(outputs.length===3){const change=outputs[2];
   if(!ownerKey||!/^[1-9][0-9]*$/.test(String(change.value))||change.covenant||wireSpk(change.scriptPublicKey)!=='000020'+ownerKey+'ac')return null;
  }
- const match=scope.filter(r=>String(o?.value)===REGISTRATION_SOMPI&&wireSpk(spk)===wireSpk(r.spk)&&!o?.covenant);
+ const match=scope.filter(r=>String(o?.value)===amountSompi&&wireSpk(spk)===wireSpk(r.spk)&&!o?.covenant);
  if(match.length!==1)return null;
- return {address:match[0].address,outpoint:{transactionId:tx.verboseData.transactionId,index:1},amountSompi:REGISTRATION_SOMPI,spk:match[0].spk};
+ return {address:match[0].address,outpoint:{transactionId:tx.verboseData.transactionId,index:1},amountSompi,spk:match[0].spk};
 }

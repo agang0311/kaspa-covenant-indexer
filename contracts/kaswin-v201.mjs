@@ -8,7 +8,7 @@ import crypto from 'node:crypto';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {createV2RoundAdapter} from './v2-rounds.mjs';
 import {wireSpk} from '../src/normalize.mjs';
-import {registryScope, registrationOf, DEFAULT_REGISTRY_ADDRESS} from '../../tn10-index/vps/registry.mjs';
+import {registryScope, registrationOf, DEFAULT_REGISTRY_ADDRESS} from '../src/adapter/registry.mjs';
 import {actionOf} from './kaswin-v2.mjs';
 
 const HASH = /^[0-9a-f]{64}$/;

@@ -5,7 +5,7 @@ import path from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {createV2RoundAdapter} from './v2-rounds.mjs';
 import {wireSpk} from '../src/normalize.mjs';
-import {registryScope, registrationOf, DEFAULT_REGISTRY_ADDRESS, REGISTRATION_SOMPI} from '../../tn10-index/vps/registry.mjs';
+import {registryScope, registrationOf, DEFAULT_REGISTRY_ADDRESS, REGISTRATION_SOMPI} from '../src/adapter/registry.mjs';
 const HASH = /^[0-9a-f]{64}$/;
 const TN10_GENESIS = 'f896a3034873be1739fc4359236899fd3d65d2bc94f9780df0d0da3eb1cc4370';
 const ACTIONS = {81: 'BUY', 82: 'CLOSE', 84: 'DRAW_AND_PAY', 89: 'TIMEOUT_REFUND', 90: 'REFUND'};
