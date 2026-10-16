@@ -1,0 +1,87 @@
+{
+  "schema": "KASWIN_CANDIDATE_COMPILE_COMPARISON_1",
+  "at": "2026-10-14T23:01:01.934Z",
+  "contractVersion": "V2.0.2",
+  "status": "COMPILED_UNAPPROVED",
+  "evidenceLevel": "L",
+  "candidate": "/root/kaswin-publish-20261005/references/contract-candidate-v202-compile-01",
+  "repeat": "/root/kaswin-publish-20261005/references/contract-candidate-v202-compile-02",
+  "profileId": "ed0387c9e77bb4e0a8f1f4654a326c316d83663f455283ec6a046a095c94856d",
+  "priorProfileId": "78c11314f95531345fb6f8614d4d628e2dbfac3429b7c9e37f4161a3a40907f7",
+  "compilerCommit": "3ed973335b59269293564805cc2c58a14595ec03",
+  "compilerBinarySha256": "81de9aa4157dbde3633ebab629e86c5975770fc13ee2d2093e52d7f725616a00",
+  "layoutSha256": "f040ae34f15d120c6c5253f33cb5c9f8127b85e08d5dad397f2036b3f35c028e",
+  "compileOrder": [
+    "refunding",
+    "sealed",
+    "open"
+  ],
+  "rows": [
+    {
+      "module": "refunding",
+      "tailBytes": 9888,
+      "templateHash": "0f3649d95a57cec4005c34d33cc3e1ea48b427a709e2398d7360327d20f60ce6",
+      "dispatchTag": "f0c4e51b",
+      "stateSpan": {
+        "offset": 1,
+        "len": 118
+      },
+      "sourceSha256": "10f04bd99ec265557e4c146ce104fc9caa2dda649fd14b45a74897f842acae88",
+      "artifactSha256": "c92e383dd7f1c440123f1534a31ae7852eb1ed74bd4144051a46a269e8a73d8a",
+      "repeatArtifactIdentical": true,
+      "oldTailIdentical": true,
+      "oldConstructorBytecodeIdentical": true,
+      "oldAbiAndDispatchIdentical": true,
+      "oldRuntimeStateIdentical": true,
+      "oldConstructorArgsIdentical": true
+    },
+    {
+      "module": "sealed",
+      "tailBytes": 3830,
+      "templateHash": "41029ed969cb65ab421ea39e02d8a42b3b1f78557c79f754b6d5d8ae1aa5f847",
+      "dispatchTag": "f0c4e51b",
+      "stateSpan": {
+        "offset": 1,
+        "len": 118
+      },
+      "sourceSha256": "8419af74831b685e9384613c749f0eec2ae0cfee376875c5b1cc743edfbf1d65",
+      "artifactSha256": "62d9781ed46c85582caed6ea8006f504066ffd13eafec179047df2571385fcec",
+      "repeatArtifactIdentical": true,
+      "oldTailIdentical": true,
+      "oldConstructorBytecodeIdentical": true,
+      "oldAbiAndDispatchIdentical": true,
+      "oldRuntimeStateIdentical": true,
+      "oldConstructorArgsIdentical": true
+    },
+    {
+      "module": "open",
+      "tailBytes": 3701,
+      "templateHash": "9f6792fce38a56d17ae99a5907f9ea6f004dc60ab6aa2e4eb108c1d17529c7f1",
+      "dispatchTag": "1c49a445",
+      "stateSpan": {
+        "offset": 1,
+        "len": 82
+      },
+      "sourceSha256": "8a0e79ef1541a166405bdc2d95c76746bd58996a94aa7586adaa6d58426088dc",
+      "artifactSha256": "1fff29753c3189b032a0742a0fb56852b3529ae376d441bfe2cf4b0806285cf8",
+      "repeatArtifactIdentical": true,
+      "oldTailIdentical": true,
+      "oldConstructorBytecodeIdentical": true,
+      "oldAbiAndDispatchIdentical": true,
+      "oldRuntimeStateIdentical": true,
+      "oldConstructorArgsIdentical": true
+    }
+  ],
+  "vmPreparation": {
+    "binary": "/root/kaspa/references/kaswin-vm-budget-20261009/target/release/deps/hardened_vm-e83f383214d0d13b",
+    "binarySha256": "a9e203949459fd6524b3ee62c4fbfe014f188831ffa55384d29d638e7b380b65",
+    "harnessSourceSha256": "b2e9741df1e3094e3729f0d7d48a644f917a4d5ef7bde7d1dbba097f7152bc2e",
+    "historicalManifestHashMatch": true,
+    "candidateManifestStatus": "NOT_CREATED_OR_APPROVED",
+    "entrypointStatus": "REQUIRES_ISOLATED_CANDIDATE_CORE_AND_LOADER_ADAPTATION"
+  },
+  "vm": "NOT_RUN",
+  "network": "NOT_RUN",
+  "runtimeApproval": "UNCHANGED_EMPTY_IN_SOURCE",
+  "boundary": "Compiled sample constructor bytecode and complete tails compared; no VM execution, full transaction validation, mass/fee calibration, node acceptance or independent Profile approval."
+}

@@ -1,0 +1,43 @@
+{
+  "contractVersion": "V2.0.1",
+  "protocolVersion": 2,
+  "profileId": "78c11314f95531345fb6f8614d4d628e2dbfac3429b7c9e37f4161a3a40907f7",
+  "networkGenesis": "f896a3034873be1739fc4359236899fd3d65d2bc94f9780df0d0da3eb1cc4370",
+  "compilerCommit": "3ed973335b59269293564805cc2c58a14595ec03",
+  "compilerBinarySha256": "81de9aa4157dbde3633ebab629e86c5975770fc13ee2d2093e52d7f725616a00",
+  "budgetProfileId": null,
+  "frames": {
+    "refunding": {
+      "templateSourceSha256": "6b5d60a905bd22f7737e50523c216818c4181cddd161b626f3ae4dd778910121",
+      "sourceSha256": "6b5d60a905bd22f7737e50523c216818c4181cddd161b626f3ae4dd778910121",
+      "artifactSha256": "c92e383dd7f1c440123f1534a31ae7852eb1ed74bd4144051a46a269e8a73d8a",
+      "constructorArgsSha256": "bcb5fbfc1b35e743c3985bb687dc02eed3a099014090b9f348b64279c507913b",
+      "templateHash": "0f3649d95a57cec4005c34d33cc3e1ea48b427a709e2398d7360327d20f60ce6",
+      "tailBytes": 9888,
+      "dependencies": {}
+    },
+    "sealed": {
+      "templateSourceSha256": "765917907b110d9f99e4dd0d56059433941dc7e6f113b4f2ee3612713c2d3a9b",
+      "sourceSha256": "18fe3ee5ac542ce486d68bdcbd8dc83bba26615384c402f28a11e92f7ca70b9b",
+      "artifactSha256": "62d9781ed46c85582caed6ea8006f504066ffd13eafec179047df2571385fcec",
+      "constructorArgsSha256": "c3cbff21a3243d99958fb2ecc45606cf95a2c00ae279449bd3af26b00a90296c",
+      "templateHash": "41029ed969cb65ab421ea39e02d8a42b3b1f78557c79f754b6d5d8ae1aa5f847",
+      "tailBytes": 3830,
+      "dependencies": {
+        "refunding": "0f3649d95a57cec4005c34d33cc3e1ea48b427a709e2398d7360327d20f60ce6"
+      }
+    },
+    "open": {
+      "templateSourceSha256": "d1190d6c131d5ce7b782848267da4087b27245a055ba761d5eb5feade87b2bc4",
+      "sourceSha256": "cc8e21130e30f9121e7208b62d8ab143acfdfe1aed891ccf2484fb5d603be1a2",
+      "artifactSha256": "1fff29753c3189b032a0742a0fb56852b3529ae376d441bfe2cf4b0806285cf8",
+      "constructorArgsSha256": "9eefd48453338cad382b421a7fdcada93210dbaa9163ed899d25a627ad79534c",
+      "templateHash": "9f6792fce38a56d17ae99a5907f9ea6f004dc60ab6aa2e4eb108c1d17529c7f1",
+      "tailBytes": 3701,
+      "dependencies": {
+        "sealed": "41029ed969cb65ab421ea39e02d8a42b3b1f78557c79f754b6d5d8ae1aa5f847",
+        "refunding": "0f3649d95a57cec4005c34d33cc3e1ea48b427a709e2398d7360327d20f60ce6"
+      }
+    }
+  }
+}

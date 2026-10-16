@@ -27,8 +27,9 @@ function resolveRepo(repoDir) {
   if (repoDir && typeof repoDir === 'string') return path.resolve(repoDir);
   if (process.env.KASWIN_V202_REPO) return path.resolve(process.env.KASWIN_V202_REPO);
   const candidates = [
+    path.resolve(fileURLToPath(new URL('../artifacts/v202', import.meta.url))),
     path.resolve(fileURLToPath(new URL('../../../references/kaswin-v202', import.meta.url))),
-    path.resolve(fileURLToPath(new URL('../references/kaswin-v202', import.meta.url))),
+    '/opt/kaspa-covenant-indexer/artifacts/v202',
     '/opt/kaswin-event-indexer/references/kaswin-v202',
     '/root/kaswin-publish-20261005'
   ];

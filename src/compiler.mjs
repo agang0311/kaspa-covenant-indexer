@@ -11,8 +11,8 @@ export function findSilverc(customPath = null) {
     process.env.SILVERC_PATH,
     path.resolve(process.cwd(), 'bin/silverc'),
     path.resolve(process.cwd(), '../bin/silverc'),
-    '/opt/kaswin-event-indexer/bin/silverc',
-    '/root/kaspa/references/silverscript-v1.0.0/target/debug/silverc'
+    '/opt/kaspa-covenant-indexer/bin/silverc',
+    '/opt/kaswin-event-indexer/bin/silverc'
   ].filter(Boolean);
 
   for (const c of candidates) {

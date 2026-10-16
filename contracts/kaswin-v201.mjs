@@ -24,8 +24,10 @@ function resolveRepo(repoDir) {
   if (repoDir && typeof repoDir === 'string') return path.resolve(repoDir);
   if (process.env.KASWIN_V201_REPO) return path.resolve(process.env.KASWIN_V201_REPO);
   const candidates = [
-    path.resolve(fileURLToPath(new URL('../../../references/kaswin-v201', import.meta.url))),
     path.resolve(fileURLToPath(new URL('../artifacts/v201', import.meta.url))),
+    path.resolve(fileURLToPath(new URL('../../../references/kaswin-v201', import.meta.url))),
+    '/opt/kaspa-covenant-indexer/artifacts/v201',
+    '/opt/kaswin-event-indexer/references/kaswin-v201',
     '/root/kaswin-publish-20261005'
   ];
   return candidates.find(c => { try { return hasBundle(c); } catch { return false; } }) ?? null;
