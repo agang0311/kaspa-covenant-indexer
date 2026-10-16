@@ -835,7 +835,10 @@ input:focus, select:focus, textarea:focus {
   <section id="tab-plugins" class="view-panel">
     <div class="section-head">
       <div>
-        <div class="section-title">🧩 Covenant 状态机插件管理 (Contract Plugins)</div>
+        <div class="section-title">
+          🧩 Covenant 状态机插件管理 (Contract Plugins)
+          <span id="pluginsNetBadge" class="tag tag-active mono" style="font-size:11px;margin-left:6px;display:none;"></span>
+        </div>
         <div class="section-desc">已装载的契约生命周期规则插件。支持配置创世守门断言、指定监听注册表地址，以及热切换主导/退役状态。</div>
       </div>
       <button class="btn btn-sm" id="btnReloadPlugins">🔄 刷新列表</button>
@@ -1128,10 +1131,18 @@ async function refreshAll() {
         '<button class="btn btn-sm" type="button" data-net="' + k + '" style="padding:2px 8px;font-size:11px;' +
         (k === (data.networkKey || netKeys[0]) ? 'border-color:var(--kaspa);color:var(--kaspa);' : 'opacity:.55;') +
         '">' + k + '</button>').join('');
-      sw.querySelectorAll('button[data-net]').forEach(b => b.onclick = () => {
+      sw.querySelectorAll('button[data-net]').forEach(b => b.onclick = async () => {
         selectedNetwork = b.dataset.net;
         try { localStorage.setItem('kci.network', selectedNetwork); } catch {}
-        refreshAll();
+        window._poolLoaded = false;
+        await refreshAll();
+        // Immediately refresh the currently active tab content so switching networks always updates the view!
+        const activeTab = document.querySelector('.view-panel.active')?.id;
+        if (activeTab === 'tab-plugins') {
+          await loadPluginsTab();
+        } else if (activeTab === 'tab-nodes') {
+          await loadNodePoolBenchmark();
+        }
       });
     } else if (sw) { sw.style.display = 'none'; }
 
@@ -1543,6 +1554,15 @@ async function loadPluginsTab() {
   try {
     const res = await api('/plugins');
     window._pluginsData = res;
+
+    // Show currently viewed network badge in Tab 3 header
+    const netBadge = document.getElementById('pluginsNetBadge');
+    if (netBadge) {
+      const curNet = res.networkKey || selectedNetwork || 'tn10';
+      netBadge.style.display = 'inline-block';
+      netBadge.innerText = curNet.toUpperCase();
+    }
+
     const tbody = document.getElementById('tblPluginList');
     const list = res.plugins || [];
     const cfgList = res.config || [];
@@ -2121,8 +2141,11 @@ document.getElementById('btnLogout').onclick = () => {
   document.getElementById('authModal').style.display = 'flex';
 };
 
-document.getElementById('btnRefresh').onclick = () => {
-  refreshAll();
+document.getElementById('btnRefresh').onclick = async () => {
+  await refreshAll();
+  const activeTab = document.querySelector('.view-panel.active')?.id;
+  if (activeTab === 'tab-plugins') await loadPluginsTab();
+  else if (activeTab === 'tab-nodes') await loadNodePoolBenchmark();
   showToast('已刷新最新状态');
 };
 
