@@ -119,7 +119,7 @@ export async function handleAdmin(req, res, ctx) {
       send(200, {
         ok: true,
         name: 'kaspa-covenant-indexer',
-        version: 'v0.1.1',
+        version: 'v0.1.2',
         uptimeSec: Math.floor(process.uptime()),
         memory: {
           rssMb: +(mem.rss / 1024 / 1024).toFixed(1),

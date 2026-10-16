@@ -614,7 +614,7 @@ input:focus, select:focus, textarea:focus {
     <div class="header-brand-line">
       <div class="brand">
         <span class="logo-badge">KCI</span>
-        <span class="version-badge" id="appVersionBadge">v0.1.1</span>
+        <span class="version-badge" id="appVersionBadge">v0.1.2</span>
         <span class="brand-title">Kaspa Covenant Indexer</span>
       </div>
       <div class="header-btns">
@@ -802,18 +802,18 @@ input:focus, select:focus, textarea:focus {
     <div class="card">
       <div class="section-title" style="margin-bottom:6px;">🔍 自定义节点连通性探测 (Endpoint Probe)</div>
       <div class="section-desc" style="margin-bottom:12px;">
-        输入任意自定义 Kaspa wRPC 节点（支持 ws:// 或 wss://，需开放 Borsh 端口），即时探测网络、延迟与 DAG Sink 状态：
+        输入任意自定义 Kaspa wRPC 节点（支持 ws:// 或 wss://，需开放 JSON 或 Borsh 端口），即时探测网络、延迟与 DAG Sink 状态：
       </div>
       <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
-        <input type="text" id="inputProbeUrl" class="mono" placeholder="ws://127.0.0.1:17210 或 wss://..." value="wss://quark-10.kaspa.red/kaspa/testnet-10/wrpc/borsh" style="flex:1;min-width:200px;">
+        <input type="text" id="inputProbeUrl" class="mono" placeholder="ws://127.0.0.1:17210 或 wss://..." value="wss://quark-10.kaspa.red/kaspa/testnet-10/wrpc/json" style="flex:1;min-width:200px;">
         <button class="btn btn-sm" id="btnProbeNode" style="white-space:nowrap;">🚀 测速与体检</button>
       </div>
       <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:11px;color:var(--muted);">
         <span>快捷测试:</span>
         <button class="btn btn-sm" type="button" onclick="probeSingle('ws://127.0.0.1:17210')">本地 .201 (17210)</button>
-        <button class="btn btn-sm" type="button" onclick="probeSingle('wss://vector-10.kaspa.green/kaspa/testnet-10/wrpc/borsh')">vector-10</button>
-        <button class="btn btn-sm" type="button" onclick="probeSingle('wss://quark-10.kaspa.red/kaspa/testnet-10/wrpc/borsh')">quark-10</button>
-        <button class="btn btn-sm" type="button" onclick="probeSingle('wss://muon-10.kaspa.blue/kaspa/testnet-10/wrpc/borsh')">muon-10</button>
+        <button class="btn btn-sm" type="button" onclick="probeSingle('wss://vector-10.kaspa.green/kaspa/testnet-10/wrpc/json')">vector-10</button>
+        <button class="btn btn-sm" type="button" onclick="probeSingle('wss://quark-10.kaspa.red/kaspa/testnet-10/wrpc/json')">quark-10</button>
+        <button class="btn btn-sm" type="button" onclick="probeSingle('wss://muon-10.kaspa.blue/kaspa/testnet-10/wrpc/json')">muon-10</button>
       </div>
       <div id="probeResultBox" style="display:none;margin-top:12px;"></div>
     </div>

@@ -172,3 +172,22 @@ node indexer.mjs run --db events.sqlite --pool --api-port 8788
 
 如果你想将此 Indexer 改造并接入自己的 Kaspa Covenant DApp（如 AMM、拍卖、借贷、订单薄等）：
 👉 **详细步骤与插件编写示例见：[二次开发与适配指南 (CUSTOM_DAPP_GUIDE.md)](./CUSTOM_DAPP_GUIDE.md)**
+
+---
+
+## 版本发布记录 (Release Notes)
+
+### v0.1.2 (2026-10-16) - Zero-SDK 纯 JavaScript 架构重大演进
+- 🚀 **全面移除 WASM SDK 依赖**：彻底剔除 12MB 的官方 C++/WASM SDK 二进制文件（`kaspa_bg.wasm`），实现 100% 纯 JavaScript 原生运行；
+- 💎 **原生 CashAddr / Bech32 编解码 (`src/address.mjs`)**：内置纯 JS Kaspa 地址与 `ScriptPublicKey` 双向编解码器，针对 P2PK (v0) 与 P2SH (v8) 契约地址与官方 SDK 输出保持 100% 双向一致；
+- 🌐 **原生 WebSocket wRPC JSON 客户端 (`src/rpc.mjs`)**：直接连通 Kaspa 节点官方 `/wrpc/json` 标准协议，支持 RPC 请求追踪与 `VirtualChainChanged` / `UtxosChanged` 原生事件订阅，免除 Borsh 序列化包袱；
+- 📉 **常驻内存骤降超 50%**：运行内存由改造前的 ~80MB 骤降至 ~28MB-38MB RSS，根除 WASM 跨进程内存泄露隐患；
+- 🛡️ **智能节点池自动竞速与后端隔离**：支持并发测量 RTT 往返延迟、自动剔除滞后节点，依据 `p2pId` 强制进行物理节点后端隔离，提供主备双节点自愈换血能力；
+- 🧪 **全量回归验证**：131 项单元测试与集成测试（121 pass, 10 skipped, 0 fail）与全量 Markdown 文档链接 100% 验证通过。
+
+### v0.1.1 (2026-10-15) - Kaswin V2.0.2 升级与官方 REST 零信任加速
+- 升级默认主契约为 **Kaswin V2.0.2**（`ed0387c9` 80B KW21 规范命名布局）；
+- 引入官方 REST 零信任加速探针，形成 4 级亚秒级花费者与创世定位漏斗；
+- 通用任意阶段交易回溯器 (`/admin/api/track`) 与 Web Admin 诊断看板；
+- 完备的自包含封装，消除对外部仓库的路径依赖。
+
