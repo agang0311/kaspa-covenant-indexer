@@ -1,30 +1,44 @@
-// SDK 2.1.0 RpcClient via kaspa-resolver (or an explicit URL, never both). Read-only: no submit, no wallet.
-// strategy 'fallback' + connectDeadlineMs: fail fast and dispose the client (used by dual-node members, which reconnect
-// themselves; measured 2026-09-30: a connect against a refusing endpoint may hang past timeoutDuration).
-export async function openNode(sdk, {network = 'testnet-10', url = null, resolverUrls = null, tls = undefined, timeoutMs = 15000, log = () => {},
-  strategy = 'retry', connectDeadlineMs = null} = {}) {
-  if (url && resolverUrls) throw Error('URL_AND_RESOLVER_ARE_EXCLUSIVE');
-  const resolver = url ? undefined : new sdk.Resolver(resolverUrls ? {urls: resolverUrls, ...(tls === undefined ? {} : {tls})} : undefined);
-  const rpc = new sdk.RpcClient(url ? {url, networkId: network, encoding: sdk.Encoding.Borsh} : {resolver, networkId: network, encoding: sdk.Encoding.Borsh});
+// Native JSON wRPC Node Interface (Zero WASM SDK dependencies).
+import {JsonRpcClient} from './rpc.mjs';
+import {addressOfFactory, addressToSpk, spkToAddress} from './address.mjs';
+
+export {addressOfFactory, addressToSpk, spkToAddress};
+
+export async function openNode(sdkOrOpts, maybeOpts = {}) {
+  const opts = (sdkOrOpts && typeof sdkOrOpts === 'object' && !sdkOrOpts.RpcClient) ? sdkOrOpts : maybeOpts;
+  const {
+    network = 'testnet-10',
+    url = null,
+    timeoutMs = 15000,
+    log = () => {},
+    connectDeadlineMs = null
+  } = opts;
+
+  const rpc = new JsonRpcClient({url, networkId: network, timeoutDuration: timeoutMs});
   const handlers = {connect: [], disconnect: [], utxos: [], chain: []};
   rpc.addEventListener('connect', () => handlers.connect.forEach(f => f()));
   rpc.addEventListener('disconnect', () => handlers.disconnect.forEach(f => f()));
   rpc.addEventListener('utxos-changed', e => handlers.utxos.forEach(f => f(e.data)));
-  // Selected-chain changes (subscribed WITHOUT accepted ids). Only the removed hashes are forwarded: normal additions
-  // (10/s) carry no reorg information and are dropped here without copying (2026-10-10 reorg fast path).
   rpc.addEventListener('virtual-chain-changed', e => {
     const removed = e?.data?.removedChainBlockHashes;
-    if (Array.isArray(removed) && removed.length && removed.length <= 10_000) { const r = removed.map(String); handlers.chain.forEach(f => f(r)); }
+    if (Array.isArray(removed) && removed.length && removed.length <= 10_000) {
+      const r = removed.map(String);
+      handlers.chain.forEach(f => f(r));
+    }
   });
-  const connecting = rpc.connect({blockAsyncConnect: true, strategy: strategy === 'fallback' ? sdk.ConnectStrategy.Fallback : sdk.ConnectStrategy.Retry,
-    timeoutDuration: timeoutMs, retryInterval: 3000});
+
+  const connecting = rpc.connect({timeoutDuration: timeoutMs});
   let identity;
   try {
     if (connectDeadlineMs) {
       let timer;
-      await Promise.race([connecting, new Promise((_, reject) => { timer = setTimeout(() => reject(Error('CONNECT_TIMEOUT')), connectDeadlineMs); })])
-        .finally(() => clearTimeout(timer));
-    } else await connecting;
+      await Promise.race([
+        connecting,
+        new Promise((_, reject) => { timer = setTimeout(() => reject(Error('CONNECT_TIMEOUT')), connectDeadlineMs); })
+      ]).finally(() => clearTimeout(timer));
+    } else {
+      await connecting;
+    }
     identity = await verifyNode(rpc, network);
   } catch (e) {
     connecting.catch(() => {});
@@ -34,7 +48,9 @@ export async function openNode(sdk, {network = 'testnet-10', url = null, resolve
   log('CONNECTED', identity);
 
   const node = {
-    rpc, identity, url: url ?? null,      // url: lets a worker thread open its own connection to the same endpoint
+    rpc,
+    identity,
+    url: rpc.url ?? null,
     on(kind, fn) { handlers[kind].push(fn); },
     verify: async () => (node.identity = await verifyNode(rpc, network)),
     subscribeUtxosChanged: addrs => rpc.subscribeUtxosChanged(addrs),
@@ -57,8 +73,9 @@ async function verifyNode(rpc, network) {
   const info = await rpc.getServerInfo();
   if (info.networkId !== network) throw Error('WRONG_NETWORK_' + info.networkId);
   if (info.isSynced !== true) throw Error('NODE_NOT_SYNCED');
-  if (info.hasUtxoIndex !== true) throw Error('NODE_WITHOUT_UTXOINDEX');   // subscribeUtxosChanged/getUtxosByAddresses need it
-  let p2pId = null; try { p2pId = (await rpc.getInfo()).p2pId; } catch {}
+  if (info.hasUtxoIndex !== true) throw Error('NODE_WITHOUT_UTXOINDEX');
+  let p2pId = null;
+  try { p2pId = (await rpc.getInfo()).p2pId; } catch {}
   return {
     url: rpc.url ?? null,
     nodeId: rpc.nodeId ?? null,
@@ -69,13 +86,5 @@ async function verifyNode(rpc, network) {
     hasUtxoIndex: true,
     virtualDaaScore: info.virtualDaaScore ? info.virtualDaaScore.toString() : null,
     checkedAt: new Date().toISOString()
-  };
-}
-
-export function addressOfFactory(sdk, network) {
-  return spk => {
-    const s = new sdk.ScriptPublicKey(spk.version, spk.script);
-    try { const a = sdk.addressFromScriptPublicKey(s, network); if (!a) throw Error('SPK_HAS_NO_ADDRESS'); return a.toString(); }
-    finally { s.free?.(); }
   };
 }

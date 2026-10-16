@@ -9,6 +9,7 @@ import {compileSilverScript} from './compiler.mjs';
 import {generatePluginCode} from './generator.mjs';
 import {TN10_SEED} from './node-pool.mjs';
 import {traceAndTrackTxid} from './tracer.mjs';
+import {JsonRpcClient} from './rpc.mjs';
 
 export function verifyAdminToken(req, expectedToken) {
   if (!expectedToken) return false;
@@ -265,9 +266,9 @@ export async function handleAdmin(req, res, ctx) {
         const probeSingleTarget = async (url) => {
           let rpc = null;
           try {
-            rpc = new sdk.RpcClient({url, networkId: network, encoding: sdk.Encoding.Borsh});
+            rpc = new JsonRpcClient({url, networkId: network, timeoutDuration: 3500});
             const t0 = performance.now();
-            await rpc.connect({blockAsyncConnect: true, strategy: sdk.ConnectStrategy.Fallback, timeoutDuration: 3500});
+            await rpc.connect({timeoutDuration: 3500});
             const rttMs = Math.round(performance.now() - t0);
             const info = await rpc.getServerInfo();
             let p2pId = null; try { p2pId = (await rpc.getInfo()).p2pId; } catch {}
@@ -366,7 +367,7 @@ export async function handleAdmin(req, res, ctx) {
           return true;
         }
 
-        rpc = new sdk.RpcClient({url: testUrl, networkId: network, encoding: sdk.Encoding.Borsh});
+        rpc = new JsonRpcClient({url: testUrl, networkId: network, timeoutDuration: 4000});
         const timeoutPromise = new Promise((_, reject) => {
           timer = setTimeout(() => reject(new Error('CONNECT_TIMEOUT (5s)')), 5000);
           timer.unref?.();
@@ -374,7 +375,7 @@ export async function handleAdmin(req, res, ctx) {
 
         const connectTask = async () => {
           const startT = performance.now();
-          await rpc.connect({blockAsyncConnect: true, strategy: sdk.ConnectStrategy.Fallback, timeoutDuration: 4000});
+          await rpc.connect({timeoutDuration: 4000});
           const rttMs = Math.round(performance.now() - startT);
           const info = await rpc.getServerInfo();
           let p2pId = null; try { p2pId = (await rpc.getInfo()).p2pId; } catch {}

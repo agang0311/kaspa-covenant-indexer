@@ -1,16 +1,15 @@
 // F3.1 registration is an optional ordinary Genesis output, never a covenant authorization.
+import {addressToSpk, spkToAddress} from '../address.mjs';
+
 export const DEFAULT_REGISTRY_ADDRESS='kaspatest:qztrjpfpuf6g9jw76e6ay909z43hndpv5maqkker6ur4enz7llarsh82ezggl';
 export const REGISTRATION_SOMPI='5000000';
-export function registryScope(sdk,addresses){
+export function registryScope(_sdk, addresses){
  if(!Array.isArray(addresses)||addresses.length<1||addresses.length>16||new Set(addresses).size!==addresses.length)throw Error('REGISTRY_ADDRESSES');
  return addresses.map(address=>{
   if(typeof address!=='string'||!address.startsWith('kaspatest:')||address.length>120)throw Error('REGISTRY_TN10_ADDRESS');
-  const a=new sdk.Address(address);try{
-   const p=sdk.payToAddressScript(a);try{
-    if(sdk.addressFromScriptPublicKey(p,'testnet-10').toString()!==address)throw Error('REGISTRY_ADDRESS_ROUNDTRIP');
-    return {address,spk:{version:p.version,script:p.script}};
-   }finally{p.free?.();}
-  }finally{a.free?.();}
+  const spk = addressToSpk(address, 'kaspatest');
+  if(spkToAddress(spk, 'kaspatest') !== address)throw Error('REGISTRY_ADDRESS_ROUNDTRIP');
+  return {address, spk};
  });
 }
 const wireSpk=p=>typeof p==='string'?p:/^[0-9a-f]*$/.test(p?.script??'')&&Number.isInteger(p?.version)&&p.version>=0&&p.version<=65535?p.version.toString(16).padStart(4,'0').match(/../g).reverse().join('')+p.script:null;

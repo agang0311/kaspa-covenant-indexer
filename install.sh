@@ -71,7 +71,6 @@ cp -r "$SCRIPT_DIR/package.json" "$INSTALL_DIR/"
 cp -r "$SCRIPT_DIR/src" "$INSTALL_DIR/"
 cp -r "$SCRIPT_DIR/contracts" "$INSTALL_DIR/"
 cp -r "$SCRIPT_DIR/artifacts" "$INSTALL_DIR/"
-cp -r "$SCRIPT_DIR/sdk" "$INSTALL_DIR/"
 if [[ -f "$SCRIPT_DIR/.env.example" && ! -f "$INSTALL_DIR/.env" ]]; then
   cp "$SCRIPT_DIR/.env.example" "$INSTALL_DIR/.env"
 fi

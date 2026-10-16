@@ -8,7 +8,6 @@
 //   node workers/kaswin-event-indexer/indexer.mjs contracts [--contracts FILE]     (load + print, no network)
 //   node workers/kaswin-event-indexer/indexer.mjs status [--db PATH]
 import {parseArgs} from 'node:util';
-import {loadSdk} from './src/sdk.mjs';
 import {Store} from './src/store.mjs';
 import {Engine} from './src/engine.mjs';
 import {loadContracts} from './src/contracts.mjs';
@@ -44,11 +43,11 @@ if (cmd === 'status') {
   process.exit(0);
 }
 
-const sdk = loadSdk(), network = 'testnet-10';
-const contracts = await loadContracts(o.contracts, {sdk, network, registryAddresses: o.registryAddresses});
+const network = 'testnet-10';
+const contracts = await loadContracts(o.contracts, {network, registryAddresses: o.registryAddresses});
 if (cmd === 'contracts') { console.log(JSON.stringify({config: o.contracts, contracts: contracts.describe(), watch: contracts.watchAddresses()}, null, 1)); process.exit(0); }
 if ([o.url, o.urls, o.resolver, o.pool].filter(Boolean).length > 1) throw Error('USE_ONE_OF_URL_URLS_RESOLVER_POOL');
-const openMember = url => openNode(sdk, {network, url, strategy: 'fallback', timeoutMs: 6000, connectDeadlineMs: 8000});
+const openMember = url => openNode({network, url, strategy: 'fallback', timeoutMs: 6000, connectDeadlineMs: 8000});
 const probe = async url => {
   const n = await openMember(url);
   try {
@@ -79,8 +78,8 @@ if (o.pool) {
     return next?.url ?? null;
   }});
 } else if (o.urls) node = await openDualNode({urls: o.urls.split(',').map(s => s.trim()), log, open: openMember});
-else node = await openNode(sdk, {network, url: o.url ?? null, resolverUrls: o.resolver ? o.resolver.split(',') : null, log});
-const engine = new Engine({store, contracts, node, addressOf: addressOfFactory(sdk, network), log,
+else node = await openNode({network, url: o.url ?? null, resolverUrls: o.resolver ? o.resolver.split(',') : null, log});
+const engine = new Engine({store, contracts, node, addressOf: addressOfFactory(null, network), log,
   config: {network, finalityBlueScore: BigInt(o['finality-blue-score']), restUrl: o.restUrl}});
 node.on('utxos', data => engine.onUtxosChanged(data));
 node.on('chain', removed => engine.onChainChanged(removed));
@@ -136,7 +135,6 @@ if (o['api-port']) {
     engine,
     contracts,
     node,
-    sdk,
     network,
     adminToken,
     contractsPath: o.contracts,

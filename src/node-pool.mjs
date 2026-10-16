@@ -5,13 +5,13 @@
 
 /** Seed list (TN10 public, as returned by kaspa-resolver on 2026-09-30). Resolver discovery adds to it at run time. */
 export const TN10_SEED = Object.freeze([
-  'wss://muon-10.kaspa.blue/kaspa/testnet-10/wrpc/borsh',
-  'wss://vector-10.kaspa.green/kaspa/testnet-10/wrpc/borsh',
-  'wss://quark-10.kaspa.red/kaspa/testnet-10/wrpc/borsh',
-  'wss://electron-10.kaspa.stream/kaspa/testnet-10/wrpc/borsh',
-  'wss://neutrino-10.kaspa.stream/kaspa/testnet-10/wrpc/borsh',
-  'wss://electron-10.kaspa.blue/kaspa/testnet-10/wrpc/borsh',
-  'wss://proton-10.kaspa.stream/kaspa/testnet-10/wrpc/borsh',
+  'wss://muon-10.kaspa.blue/kaspa/testnet-10/wrpc/json',
+  'wss://vector-10.kaspa.green/kaspa/testnet-10/wrpc/json',
+  'wss://quark-10.kaspa.red/kaspa/testnet-10/wrpc/json',
+  'wss://electron-10.kaspa.stream/kaspa/testnet-10/wrpc/json',
+  'wss://neutrino-10.kaspa.stream/kaspa/testnet-10/wrpc/json',
+  'wss://electron-10.kaspa.blue/kaspa/testnet-10/wrpc/json',
+  'wss://proton-10.kaspa.stream/kaspa/testnet-10/wrpc/json',
 ]);
 
 /**

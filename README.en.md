@@ -10,7 +10,7 @@ This service tracks on-chain UTXO events, resolves spenders, validates selected-
 - 🛡️ **Role-Based Security**: Query and diagnostic APIs require zero authentication; only state-mutating management operations require the admin password (`ADMIN_TOKEN`).
 - 🎯 **Universal TXID Tracer**: Trace from transaction hashes at **ANY stage** (Genesis, BUY, CLOSE, REFUND, DRAW) back to the root Genesis, extract the immutable Covenant ID (CID), deduplicate against existing database records, and automatically catch up on-chain states.
 - ⚡ **No Continuous Chain Scanning & 4-Tier Spender Funnel**: Event-driven tracking through a four-tier locator funnel (Mempool -> Fast VC Page -> Official REST Zero-Trust Hint Oracle -> Bounded Fallback Scan), enabling sub-second spender resolution with minimal memory footprint (<100MB RSS).
-- 📦 **100% Zero External Monorepo Dependencies**: Self-contained distribution with embedded official Kaspa WASM SDK (pinned v2.1.0), all contract rule artifacts (`artifacts/`), and local compilation tools (`bin/silverc`).
+- 📦 **100% Self-Contained Zero-SDK Pure-JS Architecture**: Pure native JavaScript implementation completely eliminating the 12MB C++/WASM binary SDK; native WebSocket Kaspa wRPC JSON protocol and Pure-JS CashAddr/Bech32 codecs, slashing resident memory to ~28MB RSS; embeds all contract rule artifacts (`artifacts/`) and local compilation tools (`bin/silverc`).
 
 ---
 

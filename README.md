@@ -11,7 +11,7 @@ Kaspa 状态契约（Stateful Covenant）通用事件索引器、CID REST 服务
 - 🛡️ **管理操作安全隔离**：链上无私钥、不签名、不广播；仅修改配置、启停插件、安装卸载等**核心管理动作**才需要管理员密码；
 - 🎯 **通用交易追溯器 (Universal Tracer)**：支持输入合约生命周期中**任意阶段的 TXID**（Genesis / BUY / CLOSE / REFUND / DRAW），自动沿链反向回溯提取 CID、精准去重并由索引器全自动追补状态；
 - ⚡ **无持续扫链与四级定位漏斗**：基于 UTXO 通知与多级定位漏斗（节点内存池 -> 链尖快道 -> 官方 REST 零信任探针加速 -> 本地窗口切片兜底），实现亚秒级花费者与创世定位，内存占用极低（<100MB RSS）；
-- 📦 **100% 零外部依赖**：项目自包含 Node.js 22+ 兼容的官方 Kaspa WASM SDK (2.1.0)、全版本契约规则产物（`artifacts/`）与本地编译工具（`bin/silverc`）。
+- 📦 **100% 零外部依赖与 Zero-SDK 纯 JS 架构**：纯原生 JavaScript 架构，彻底移除 12MB C++/WASM SDK 二进制依赖；原生 Node.js WebSocket 实现 Kaspa wRPC JSON 协议与 Pure-JS CashAddr/Bech32 编解码，常驻内存仅 ~28MB RSS；内嵌全版本契约规则产物（`artifacts/`）与本地编译工具（`bin/silverc`）。
 
 ---
 

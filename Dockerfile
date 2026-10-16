@@ -9,7 +9,6 @@ COPY indexer.mjs ./
 COPY contracts/ ./contracts/
 COPY src/ ./src/
 COPY artifacts/ ./artifacts/
-COPY sdk/ ./sdk/
 
 RUN mkdir -p /data && chown -R node:node /app /data
 
