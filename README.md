@@ -5,12 +5,13 @@
 Kaspa 状态契约（Stateful Covenant）通用事件索引器、CID REST 服务与 Admin 管理控制台的独立自包含发布版本。
 全面支持 **Kaspa Testnet 10 (TN10)**、**SilverScript** 与 **Argent** 契约生命周期管理。
 
-本项目用于监听链上事件、定位花费者、验证选定链 acceptance、核验多版本契约状态机规则（内置 **Kaswin V2** `7aaf76fe`、**F3.2** `7ca61d81` 与 **F3** `1dc41809`），并提供：
-- 🔍 **CID REST 查询 API**：为各类前端 DApp / Web 提供高并发、零延迟的契约最新状态只读查询；
-- 🖥️ **Web 控制台 (`/admin`)**：内置现代化暗黑管理面板，支持实时节点连通性测速、节点健康体检、内存/负载监控与合约插件热启停；
-- 🛡️ **纯只读与安全隔离**：链上无私钥、不签名、不广播；管理 API 全面受 Admin Token 认证保护，隔绝越权与注入风险；
+本项目用于监听链上事件、定位花费者、验证选定链 acceptance、核验多版本契约状态机规则（内置 **Kaswin V2.0.2** `ed0387c9` 主契约，兼容 **V2.0.1** `78c11314`、**V2** `7aaf76fe` / `206d4ec7`、**F3.2** `7ca61d81` 与 **F3** `1dc41809`），并提供：
+- 🔍 **全开放免密 REST API**：所有查询接口（`/v1/rounds`、`/status`、`/admin/api/status`、`/admin/api/track` 等）**100% 免密开放**，供各类前端 DApp / 监控高并发调用；
+- 🖥️ **Web 控制台 (`/admin`)**：内置现代化暗黑管理面板，支持实时节点连通性测速、节点健康体检、通用交易全链路追溯、SilverScript 在线编译工坊与契约插件热载；
+- 🛡️ **管理操作安全隔离**：链上无私钥、不签名、不广播；仅修改配置、启停插件、安装卸载等**核心管理动作**才需要管理员密码；
+- 🎯 **通用交易追溯器 (Universal Tracer)**：支持输入合约生命周期中**任意阶段的 TXID**（Genesis / BUY / CLOSE / REFUND / DRAW），自动沿链反向回溯提取 CID、精准去重并由索引器全自动追补状态；
 - ⚡ **无持续扫链与四级定位漏斗**：基于 UTXO 通知与多级定位漏斗（节点内存池 -> 链尖快道 -> 官方 REST 零信任探针加速 -> 本地窗口切片兜底），实现亚秒级花费者与创世定位，内存占用极低（<100MB RSS）；
-- 📦 **零外部依赖**：已内置 Node.js 22+ 兼容的官方 Kaspa WASM SDK (2.1.0) 与编译后契约规则包。
+- 📦 **100% 零外部依赖**：项目自包含 Node.js 22+ 兼容的官方 Kaspa WASM SDK (2.1.0)、全版本契约规则产物（`artifacts/`）与本地编译工具（`bin/silverc`）。
 
 ---
 
@@ -113,13 +114,38 @@ systemctl restart kaswin-indexer.service  # 重启服务
 
 ## REST API 接口说明
 
-服务默认运行在 `8788` 端口：
+服务默认运行在 `8788` 端口，**所有查询类接口 100% 开放免密（CORS 友好）**：
 
+### 1. 契约轮次查询
 - `GET /v1/rounds`：获取已索引轮次列表（支持 `?limit=50`、`?cursor=<cid>` 分页）。
 - `GET /v1/rounds?status=open`：筛选进行中轮次。
 - `GET /v1/rounds?status=sealed`：筛选已封存/待结算轮次。
 - `GET /v1/rounds?status=close`：筛选已完结/终局轮次。
 - `GET /v1/rounds/{cid}`：根据 64 位十六进制 Covenant ID 查询轮次详情。
+
+### 2. 索引器与节点状态查询（免密）
+- `GET /status` 或 `GET /v1/status`：获取当前索引器版本、主连接节点、选定链 DAA、收录轮次统计及当前活动契约插件。
+- `GET /admin/api/status`：管理看板运行指标与审计流水镜像。
+- `GET /admin/api/plugins`：已加载的全部契约插件列表与规则指纹。
+- `GET /admin/api/node-pool`：候选节点池与双节点热备当前健康拓扑。
+- `POST /admin/api/probe-rest`：官方 REST 零信任加速探针在线握手诊断。
+
+### 3. 通用交易全链路追溯器 (Universal Tracer, 免密)
+- `POST /admin/api/track`：输入任意阶段的交易哈希，自动反向回溯至创世、提取 CID、与本地数据库比对去重；若为未收录轮次则自动提交索引器进行全生命周期追块：
+  ```bash
+  # 请求体
+  curl -s -X POST -H "Content-Type: application/json" \
+    -d '{"txid": "85d293040cb5f342f26f378a9918b4449439bc025840af27195e47052c067dad"}' \
+    http://localhost:8788/admin/api/track
+  ```
+
+### 4. 核心管理变更操作 (需管理员密码验证)
+- `POST /admin/api/recheck-discoveries`：重审所有被忽略的历史创世任务并触发索引器全自动追块。
+- `POST /admin/api/plugins/toggle`：启用或停用指定契约插件。
+- `POST /admin/api/plugins/update-config`：更新插件创世守门断言、监听地址与不变量。
+- `POST /admin/api/plugins/remove`：卸载插件。
+- `POST /admin/api/compile`：在线编译 SilverScript (`.sil`) 契约。
+- `POST /admin/api/generate-plugin` / `POST /admin/api/install-plugin`：自动生成并热载插件。
 
 ---
 

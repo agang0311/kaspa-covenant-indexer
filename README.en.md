@@ -4,12 +4,13 @@
 
 Standalone stateful covenant event indexer, CID REST service, and Admin Studio for **Kaspa Testnet 10**, **SilverScript**, and **Argent** covenants.
 
-This service tracks on-chain UTXO events, resolves spenders, validates selected-chain transaction acceptance, enforces multi-version contract transition rules (defaulting to **V2** `7aaf76fe`, with backward compatibility for existing **F3.2** `7ca61d81` and **F3** `1dc41809` terminal rounds), and provides:
-- 🔍 **CID REST Service**: Low-latency, CID-keyed REST endpoints for front-end DApps and web applications.
-- 🖥️ **Web Admin Studio (`/admin`)**: Embedded dark-themed management dashboard featuring real-time node latency probing, node health diagnosis, memory/load metrics, and contract plugin hot-toggling.
-- 🛡️ **Read-Only & Secure**: Holds no private keys, signs no transactions, and never broadcasts. Admin endpoints are fully protected by Admin Token authentication.
+This service tracks on-chain UTXO events, resolves spenders, validates selected-chain transaction acceptance, enforces multi-version contract transition rules (defaulting to **Kaswin V2.0.2** `ed0387c9`, with backward compatibility for **V2.0.1** `78c11314`, **V2** `7aaf76fe` / `206d4ec7`, **F3.2** `7ca61d81`, and **F3** `1dc41809` terminal rounds), and provides:
+- 🔍 **Open & Public REST Service**: Low-latency, CID-keyed REST endpoints completely open and unauthenticated for front-end DApps, explorers, and bots.
+- 🖥️ **Web Admin Studio (`/admin`)**: Embedded dark-themed management dashboard featuring real-time node latency probing, node health diagnosis, Universal TXID Tracer, SilverScript compiler workbench, and contract plugin hot-toggling.
+- 🛡️ **Role-Based Security**: Query and diagnostic APIs require zero authentication; only state-mutating management operations require the admin password (`ADMIN_TOKEN`).
+- 🎯 **Universal TXID Tracer**: Trace from transaction hashes at **ANY stage** (Genesis, BUY, CLOSE, REFUND, DRAW) back to the root Genesis, extract the immutable Covenant ID (CID), deduplicate against existing database records, and automatically catch up on-chain states.
 - ⚡ **No Continuous Chain Scanning & 4-Tier Spender Funnel**: Event-driven tracking through a four-tier locator funnel (Mempool -> Fast VC Page -> Official REST Zero-Trust Hint Oracle -> Bounded Fallback Scan), enabling sub-second spender resolution with minimal memory footprint (<100MB RSS).
-- 📦 **Zero External Monorepo Dependencies**: Self-contained distribution with embedded official Kaspa WASM SDK (pinned v2.1.0) and precompiled contract rule packages.
+- 📦 **100% Zero External Monorepo Dependencies**: Self-contained distribution with embedded official Kaspa WASM SDK (pinned v2.1.0), all contract rule artifacts (`artifacts/`), and local compilation tools (`bin/silverc`).
 
 ---
 
@@ -112,13 +113,37 @@ Under Kaspa GHOSTDAG, the indexer avoids expensive unbounded block scans. When a
 
 ## REST API Reference
 
-The service serves read-only JSON endpoints on port `8788` (CORS-friendly):
+The service serves read-only JSON endpoints on port `8788` (**100% open and unauthenticated for all query operations**, CORS-friendly):
 
+### 1. Covenant Rounds Query
 - `GET /v1/rounds`: List indexed rounds (supports keyset pagination via `?limit=50` and `?cursor=<cid>`).
 - `GET /v1/rounds?status=open`: Filter rounds in active/open purchasing phase.
 - `GET /v1/rounds?status=sealed`: Filter rounds in sealed/pending settlement phase.
 - `GET /v1/rounds?status=close`: Filter completed or refunded terminal rounds.
 - `GET /v1/rounds/{cid}`: Fetch detailed round state, history, and purchase records by its 64-character lowercase hex Covenant ID.
+
+### 2. Service & Node Status (Unauthenticated)
+- `GET /status` or `GET /v1/status`: Retrieve indexer version, active consensus node, DAA score, round counts, and active contract plugins.
+- `GET /admin/api/status`: Admin overview metrics and journal mirrors.
+- `GET /admin/api/plugins`: List of loaded contract plugins and profile digests.
+- `GET /admin/api/node-pool`: Node pool health matrix and dual-node topology.
+- `POST /admin/api/probe-rest`: Official REST zero-trust accelerator handshake diagnosis.
+
+### 3. Universal TXID Tracer (Unauthenticated)
+- `POST /admin/api/track`: Submit a transaction ID from any stage to trace backwards, extract CID, deduplicate, and automatically catch up:
+  ```bash
+  curl -s -X POST -H "Content-Type: application/json" \
+    -d '{"txid": "85d293040cb5f342f26f378a9918b4449439bc025840af27195e47052c067dad"}' \
+    http://localhost:8788/admin/api/track
+  ```
+
+### 4. Admin Management Operations (Requires Password)
+- `POST /admin/api/recheck-discoveries`: Re-evaluate previously unmatched genesis tasks and trigger auto-catchup.
+- `POST /admin/api/plugins/toggle`: Enable or retire contract plugins.
+- `POST /admin/api/plugins/update-config`: Update plugin invariant guards and watched addresses.
+- `POST /admin/api/plugins/remove`: Uninstall a plugin.
+- `POST /admin/api/compile`: Compile SilverScript (`.sil`) code into JSON artifacts.
+- `POST /admin/api/generate-plugin` / `POST /admin/api/install-plugin`: Auto-generate and hot-load plugins.
 
 ---
 
