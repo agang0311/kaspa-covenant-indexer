@@ -106,6 +106,8 @@ export class Engine {
       for (const p of this.contracts.forGenesis()) {
         const txid = p.discover(u);
         if (!txid || this.store.round(txid)) continue;
+        const oldTask = this.store.discovery(txid);
+        if (oldTask && oldTask.status !== 'ROLLED_BACK') continue;
         this.store.log('DISCOVERY_MARKER', {contract: p.key, txid, daa: String(u.blockDaaScore)}, at);
         const task = this.store.discoverTask(txid, {eventAt: at, daa: String(u.blockDaaScore)}, at);
         if (task.status === 'PENDING') this.run('genesis:' + txid, () => this.discoverGenesis(txid));

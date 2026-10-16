@@ -78,7 +78,8 @@ header {
   align-items: center;
   justify-content: space-between;
   width: 100%;
-  gap: 10px;
+  gap: 8px;
+  min-width: 0;
 }
 .header-status-line {
   display: flex;
@@ -90,8 +91,10 @@ header {
 .brand {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
+  flex: 1;
+  overflow: hidden;
 }
 .logo-badge {
   background: var(--kaspa-dim);
@@ -117,10 +120,18 @@ header {
   flex-shrink: 0;
 }
 .brand-title {
-  font-size: 14px;
+  font-size: 13.5px;
   font-weight: 700;
   color: var(--text);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.title-short { display: none; }
+@media (max-width: 520px) {
+  .title-full { display: none; }
+  .title-short { display: inline; }
 }
 .header-btns {
   display: flex;
@@ -523,6 +534,9 @@ input:focus, select:focus, textarea:focus {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 .journal-card {
   background: var(--bg-panel);
@@ -530,6 +544,11 @@ input:focus, select:focus, textarea:focus {
   border-radius: var(--radius-md);
   padding: 12px 14px;
   transition: border-color 0.15s;
+  box-sizing: border-box;
+  max-width: 100%;
+  overflow: hidden;
+  word-break: break-all;
+  overflow-wrap: anywhere;
 }
 .journal-card:hover {
   border-color: var(--border-light);
@@ -545,21 +564,29 @@ input:focus, select:focus, textarea:focus {
 .journal-time {
   font-size: 11px;
   color: var(--muted);
+  flex-shrink: 0;
 }
 .journal-body {
   font-size: 12px;
   line-height: 1.6;
+  max-width: 100%;
+  overflow: hidden;
+  word-break: break-all;
+  overflow-wrap: anywhere;
 }
 .journal-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 4px 12px;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 4px 10px;
+  max-width: 100%;
+  overflow: hidden;
 }
 .journal-field {
   display: flex;
   gap: 6px;
+  min-width: 0;
+  max-width: 100%;
   overflow: hidden;
-  text-overflow: ellipsis;
 }
 .journal-field-label {
   color: var(--muted);
@@ -567,8 +594,12 @@ input:focus, select:focus, textarea:focus {
 }
 .journal-field-val {
   color: var(--text);
+  min-width: 0;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
+  word-break: break-all;
+  overflow-wrap: anywhere;
 }
 </style>
 </head>
@@ -579,12 +610,12 @@ input:focus, select:focus, textarea:focus {
     <div class="header-brand-line">
       <div class="brand">
         <span class="logo-badge">KCI</span>
-        <span class="brand-title">Kaspa Covenant Indexer</span>
         <span class="version-badge" id="appVersionBadge">v0.1.1</span>
+        <span class="brand-title"><span class="title-full">Kaspa Covenant Indexer</span><span class="title-short">Kaspa Indexer</span></span>
       </div>
       <div class="header-btns">
         <button class="btn btn-header" id="btnRefresh" title="刷新状态">🔄<span class="btn-text"> 刷新</span></button>
-        <button class="btn btn-header" id="btnLogout" title="设置/更换管理员令牌">🔐<span class="btn-text"> 令牌</span></button>
+        <button class="btn btn-header" id="btnLogout" title="设置/更换管理员令牌">🔐<span class="btn-text"> 登录管理</span></button>
       </div>
     </div>
     <div class="header-status-line">
@@ -1191,6 +1222,9 @@ function renderJournalFeed(logs) {
         (d.txid ? '<div class="journal-field"><span class="journal-field-label">重放 TXID:</span><span class="journal-field-val mono">' + d.txid.slice(0, 16) + '...</span></div>' : '') +
       '</div>';
     } else if (l.kind === 'DISCOVERY_MARKER') {
+      const discKey = (d.txid || '') + ':' + (d.contract || '');
+      if (discKey && seenDiscoveryTxids.has(discKey)) return '';
+      if (discKey) seenDiscoveryTxids.add(discKey);
       tagClass = 'tag-standby';
       kindLabel = '🔍 发现新契约创世 (Discovery)';
       bodyHtml = '<div class="journal-grid">' +
@@ -1198,18 +1232,28 @@ function renderJournalFeed(logs) {
         '<div class="journal-field"><span class="journal-field-label">创世 TXID:</span><span class="journal-field-val mono">' + (d.txid ? d.txid.slice(0, 16) + '...' : '-') + '</span></div>' +
         '<div class="journal-field"><span class="journal-field-label">发生 DAA:</span><span class="journal-field-val mono">' + (d.daa || '-') + '</span></div>' +
       '</div>';
+    } else if (l.kind === 'GENESIS_IGNORED') {
+      tagClass = 'tag-retired';
+      kindLabel = '⚪ 忽略非目标创世 (Genesis Ignored)';
+      const reasonText = d.reason || '非当前活动契约模版';
+      const rejText = Array.isArray(d.rejected) ? d.rejected.map(r => (r.contract ? r.contract.slice(0, 24) + '...' : '契约') + ': ' + (r.reason || '不匹配')).join('; ') : '';
+      bodyHtml = '<div class="journal-grid">' +
+        '<div class="journal-field"><span class="journal-field-label">创世 TXID:</span><span class="journal-field-val mono">' + (d.txid ? d.txid.slice(0, 16) + '...' : '-') + '</span></div>' +
+        '<div class="journal-field"><span class="journal-field-label">状态:</span><span class="journal-field-val" style="color:var(--muted);">' + reasonText + '</span></div>' +
+      '</div>' +
+      (rejText ? '<div class="mono" style="font-size:11px;color:var(--dim);margin-top:4px;word-break:break-all;overflow-wrap:anywhere;">拒绝原因: ' + rejText + '</div>' : '');
     } else if (l.kind === 'ERROR') {
       tagClass = 'tag-rose';
       borderStyle = 'border-left: 3px solid var(--rose);';
       kindLabel = '❌ 节点通信/执行异常';
-      bodyHtml = '<div style="color:var(--rose);font-size:12px;">' +
+      bodyHtml = '<div style="color:var(--rose);font-size:12px;word-break:break-all;overflow-wrap:anywhere;">' +
         '组件: <b>[' + (d.key || 'system') + ']</b> · 错误: <b>' + (d.message || JSON.stringify(d)) + '</b>' +
         '<div style="color:var(--muted);font-size:11px;margin-top:2px;">(节点瞬时抖动时索引器会自动切入热备节点重试)</div>' +
       '</div>';
     } else {
       tagClass = 'tag-retired';
       kindLabel = l.kind;
-      bodyHtml = '<div class="mono" style="font-size:11.5px;color:var(--muted);">' + JSON.stringify(d) + '</div>';
+      bodyHtml = '<div class="mono" style="font-size:11.5px;color:var(--muted);word-break:break-all;overflow-wrap:anywhere;white-space:pre-wrap;">' + JSON.stringify(d) + '</div>';
     }
 
     return '<div class="journal-card" style="' + borderStyle + '">' +
@@ -1219,7 +1263,9 @@ function renderJournalFeed(logs) {
       '</div>' +
       '<div class="journal-body">' + bodyHtml + '</div>' +
     '</div>';
-  }).join('');
+  }).filter(Boolean);
+
+  container.innerHTML = rendered.length ? rendered.join('') : '<div class="card" style="text-align:center;color:var(--muted);padding:24px;">暂无审计流水记录</div>';
 }
 
 document.getElementById('btnRefreshJournal').onclick = () => {
