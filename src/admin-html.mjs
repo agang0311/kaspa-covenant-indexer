@@ -1549,8 +1549,16 @@ async function loadPluginsTab() {
 
     tbody.innerHTML = cfgList.map((cfg, idx) => {
       const p = list[idx] || {};
-      const regCount = (cfg.options?.registryAddresses?.length) || 0;
-      const watchText = regCount ? ('<span class="tag tag-standby">' + regCount + ' 个地址</span>') : '<span style="color:var(--dim);">无监听</span>';
+      const watchAddrs = p.config?.registryAddresses || p.watchAddresses || cfg.options?.registryAddresses || [];
+      const regCount = watchAddrs.length;
+      let watchText = '<span style="color:var(--dim);">无监听</span>';
+      if (regCount > 0) {
+        const first = watchAddrs[0];
+        const shortAddr = first.length > 26 ? (first.slice(0, 14) + '...' + first.slice(-8)) : first;
+        watchText = '<span class="tag tag-active mono" title="' + watchAddrs.join(', ') + '" style="font-size:11px;cursor:help;">' +
+          (regCount === 1 ? shortAddr : (regCount + ' 个地址 (' + shortAddr + ')')) +
+          '</span>';
+      }
       const keyName = p.key || (cfg.options?.id ? (cfg.options.id + '@' + (cfg.options.version || '1.0.0')) : cfg.module);
 
       return '<tr>' +

@@ -470,6 +470,16 @@ export async function handleAdmin(req, res, ctx) {
       }
       const view = pickView(url.searchParams.get('network'));
       if (!view) { send(400, {ok: false, error: 'UNKNOWN_NETWORK', networks: viewKeys}); return true; }
+      const effectivePlugins = (view.engine?.contracts || view.contracts)?.describe() || [];
+      const enrichedConfig = rawConfig.map((cfg, idx) => {
+        const p = effectivePlugins[idx] || {};
+        const effReg = p.config?.registryAddresses || p.watchAddresses || [];
+        const opt = {...(cfg.options || {})};
+        if (!opt.registryAddresses || !opt.registryAddresses.length) {
+          opt.registryAddresses = effReg;
+        }
+        return {...cfg, options: opt};
+      });
       send(200, {
         ok: true,
         contractsPath,
@@ -477,9 +487,9 @@ export async function handleAdmin(req, res, ctx) {
         networkKey: view.key ?? null,
         networks: viewKeys.length ? viewKeys : null,
         // What is loaded and RUNNING right now (registry address already resolved for this network).
-        plugins: (view.engine?.contracts || view.contracts)?.describe() || [],
-        // What the config FILE says. Some entries may be inert for the current plugin (see `configurable`).
-        config: rawConfig
+        plugins: effectivePlugins,
+        // Config enriched with effective per-network runtime defaults.
+        config: enrichedConfig
       });
       return true;
     }
