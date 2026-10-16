@@ -1,13 +1,20 @@
 {
-  "_comment": "Kaswin V2.0.2 (Profile ed0387c9) only. The Profile/templates are network-independent; only the registry address differs per network. The per-network registry address is injected at load time from src/networks.mjs.",
+  "_comment": "Kaswin V2.0.2 (Profile ed0387c9). Network-neutral: registry address is injected per network at load time.",
   "contracts": [
     {
       "module": "kaswin-v202.mjs",
-      "sha256": "b54a5382967688f60bd6068c3b601148ab2037a25a30c9fc94c0b371b1e61b5a",
+      "sha256": "1b1874f49d7765b3f8091640ba188e0636c62ec75f1b9852b5180541eab253ae",
       "retired": false,
       "options": {
         "profileId": "ed0387c9e77bb4e0a8f1f4654a326c316d83663f455283ec6a046a095c94856d",
         "registrationSompi": "20000000",
+        "requiredDeposit": "400000000",
+        "initialStateGuards": {
+          "phase": "1",
+          "sold": "0",
+          "purchaseCount": "0",
+          "cursor": "0"
+        },
         "coreSha256": "d62b430c0a8738dfa910403119f994433e8db8cdbc820ee02e357ed611649da8"
       }
     }

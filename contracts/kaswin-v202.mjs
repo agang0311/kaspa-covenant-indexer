@@ -90,9 +90,25 @@ export async function create(options = {}, {sdk, network} = {}) {
     if (payload.length !== prefix.length + headerBytes * 2 || !payload.startsWith(prefix)) return {match: false, reason: 'V202_TAG_PROFILE_OR_LENGTH'};
     if (!binding || binding.authorizingInput !== 0) return {match: false, reason: 'GENESIS_BINDING'};
     try {
-      G.verifyGenesisAnnouncement({accepted: true, payload, authorizingOutpoint: tx.inputs?.[0]?.previousOutpoint,
+      const s = G.verifyGenesisAnnouncement({accepted: true, payload, authorizingOutpoint: tx.inputs?.[0]?.previousOutpoint,
         outputIndex: 0, value: BigInt(output.value), spk: wireSpk(output.scriptPublicKey), covenantId: binding.covenantId,
         authorizingInput: binding.authorizingInput, covenantOutputIndices: tx.outputs.flatMap((v, i) => v.covenant?.covenantId === binding.covenantId ? [i] : [])}, profile);
+      // Optional deposit guard
+      if (o.requiredDeposit && BigInt(output.value) !== BigInt(o.requiredDeposit)) {
+        return {match: false, reason: 'DEPOSIT_GUARD_MISMATCH'};
+      }
+      // Optional initial state guards
+      if (o.initialStateGuards && typeof o.initialStateGuards === 'object') {
+        for (const [k, v] of Object.entries(o.initialStateGuards)) {
+          if (v == null || v === '') continue;
+          let actualVal;
+          if (k in s) actualVal = String(s[k]);
+          else if (s.config && k in s.config) actualVal = String(s.config[k]);
+          if (actualVal !== undefined && actualVal !== String(v)) {
+            return {match: false, reason: `GUARD_${k}_MISMATCH`};
+          }
+        }
+      }
       return {match: true};
     } catch (e) { return {match: false, reason: String(e?.message ?? e)}; }
   };
@@ -104,16 +120,16 @@ export async function create(options = {}, {sdk, network} = {}) {
       network: o.network,
       networkGenesis: o.networkGenesis,
       registryAddresses: [...watch],
-      registrationSompi: REGISTRATION_SOMPI,
-      requiredDeposit: String(S.DEPOSIT),
+      registrationSompi: o.registrationSompi,
+      requiredDeposit: o.requiredDeposit ? String(o.requiredDeposit) : String(S.DEPOSIT),
+      initialStateGuards: o.initialStateGuards || null,
+      allowedCreators: o.allowedCreators || [],
       profileId: profile.id,
       contractVersion: CONTRACT_VERSION,
       coreSha256: digest,
       repoDir: o.repoDir,
     },
-    // Options this plugin actually reads. Anything else in the config file is inert for V2.0.2 and the UI must not
-    // present it as if it were in effect.
-    configurable: ['registryAddresses', 'registrationSompi'],
+    configurable: ['registryAddresses', 'registrationSompi', 'requiredDeposit', 'allowedCreators', 'initialStateGuards'],
     watchAddresses: () => [...watch],
     discover: u => u.address && watch.has(u.address) && u.amount === fee && u.outpoint.index === 1 && (!u.covenantId || u.covenantId === S.ZERO) ? u.outpoint.transactionId : null,
     candidateGenesis: tx => typeof tx?.payload === 'string' && tx.payload.startsWith(prefix),
