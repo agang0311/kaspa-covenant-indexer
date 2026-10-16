@@ -126,15 +126,27 @@ header {
   white-space: nowrap;
   min-width: 0;
 }
-@media (max-width: 440px) {
+@media (max-width: 480px) {
+  .brand { gap: 5px; }
   .brand-title {
-    font-size: 12.5px;
+    font-size: 12px;
     letter-spacing: -0.2px;
   }
+  .logo-badge { padding: 1px 5px; font-size: 10px; }
+  .version-badge { padding: 1px 5px; font-size: 10px; }
 }
-@media (max-width: 360px) {
+@media (max-width: 380px) {
+  .brand { gap: 4px; }
   .brand-title {
-    font-size: 11.5px;
+    font-size: 11px;
+    letter-spacing: -0.4px;
+  }
+}
+@media (max-width: 340px) {
+  .logo-badge { display: none; }
+  .brand-title {
+    font-size: 10.5px;
+    letter-spacing: -0.4px;
   }
 }
 .header-btns {
@@ -197,8 +209,7 @@ header {
 
 @media (max-width: 480px) {
   .btn-text { display: none; }
-  .btn-header { padding: 4px 8px; }
-  .brand-title { font-size: 13.5px; }
+  .btn-header { padding: 4px 7px; font-size: 12px; }
 }
 
 /* Tabs: Smooth horizontal swipe on mobile */

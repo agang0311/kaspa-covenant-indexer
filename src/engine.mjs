@@ -397,7 +397,10 @@ export class Engine {
       t.unref?.();
       const res = await (this.fetchImpl ?? globalThis.fetch)(url, {signal: ac.signal});
       clearTimeout(t);
-      if (!res.ok) return null;
+      if (!res.ok) {
+        if (res.status === 404) return {notFound: true};
+        return null;
+      }
       const data = await res.json();
       if (!data?.is_accepted || !data?.accepting_block_hash) return null;
       let start = null;
@@ -445,7 +448,16 @@ export class Engine {
           from = String(added.at(-1));
         }
         scanned = true;        // scanned to sink from this start: not accepted after it; try an older start
-      } catch (e) { this.store.log('VC_QUERY_FAILED', {start, message: String(e?.message ?? e)}, this.now()); }
+      } catch (e) {
+        const msg = String(e?.message ?? e);
+        if (msg.includes('cannot find header')) {
+          const scanMeta = this.store.getMeta('discoveryScan');
+          if (scanMeta?.anchor === start) {
+            this.store.setMeta('discoveryScan', {...scanMeta, anchor: null});
+          }
+        }
+        this.store.log('VC_QUERY_FAILED', {start, message: msg}, this.now());
+      }
     }
     if (scanned) return null;
     throw Error('ACCEPTANCE_UNKNOWN_ALL_STARTS_FAILED');
@@ -679,13 +691,18 @@ export class Engine {
   // ---------- genesis discovery (registry marker event or manual track) ----------
   async discoverGenesis(txid, hint = {}) {
     const task = this.store.discoverTask(txid, hint, this.now());
+    if ((task.attempts ?? 0) >= 15) {
+      this.store.discoveryResult(txid, 'IGNORED', this.now(), task.error ?? 'EXCEEDED_MAX_ATTEMPTS');
+      return 'IGNORED';
+    }
     try {
       const result = await this.discoverGenesisAttempt(txid, task.hint);
       const newerHint = JSON.stringify(this.store.discovery(txid)?.hint) !== JSON.stringify(task.hint);
       this.store.discoveryResult(txid, result === 'KNOWN' || result === 'APPLIED' ? 'APPLIED' : result === 'IGNORED' && !newerHint ? 'IGNORED' : 'PENDING', this.now());
       return result;
     } catch (e) {
-      this.store.discoveryResult(txid, 'PENDING', this.now(), String(e?.message ?? e));
+      const nextStatus = (task.attempts ?? 0) >= 14 ? 'IGNORED' : 'PENDING';
+      this.store.discoveryResult(txid, nextStatus, this.now(), String(e?.message ?? e));
       throw e;
     }
   }
@@ -708,6 +725,10 @@ export class Engine {
     if (!from.length && this.store.getMeta('discoveryScan')?.anchor) from.push(this.store.getMeta('discoveryScan').anchor);
     if (this.config.restUrl && !starts) {
       const hint = await this.genesisFromRest(txid);
+      if (hint?.notFound) {
+        this.store.log('GENESIS_IGNORED', {txid, reason: 'transaction not found on chain (REST 404)'}, this.now());
+        return 'IGNORED';
+      }
       if (hint?.start && !from.includes(hint.start)) from.unshift(hint.start);
     }
     if (!from.length) return this.defer('genesis:' + txid, {kind: 'genesis', id: txid, hint: {eventAt, daa, starts, contract}}, 'NO_CHECKPOINT');
