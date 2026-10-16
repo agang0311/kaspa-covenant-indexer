@@ -6,7 +6,13 @@ const enc = x => JSON.stringify(x, (_, v) => typeof v === 'bigint' ? v.toString(
 const dec = s => s == null ? null : JSON.parse(s);
 
 export class Store {
-  constructor(path = ':memory:', {defaultContract = null} = {}) {
+  /**
+   * One Store instance is bound to ONE network. The binding is persisted in meta and enforced on every open, so a DB
+   * file can never be silently reused for another network (measured 2026-10-16: the same x-only key yields the SAME
+   * scriptPublicKey on TN10 and mainnet, so a cross-network DB reuse would look like valid data).
+   */
+  constructor(path = ':memory:', {defaultContract = null, network = 'tn10'} = {}) {
+    this.network = network;
     this.db = new DatabaseSync(path);
     this.db.exec(`
       PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON;
@@ -28,6 +34,10 @@ export class Store {
         attempts INTEGER NOT NULL DEFAULT 0, error TEXT, updated_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS journal(id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, kind TEXT NOT NULL, data TEXT NOT NULL);
     `);
+    // Network binding: claim an empty DB, or fail closed when the file belongs to a different network.
+    const boundNetwork = this.getMeta('network');
+    if (boundNetwork === null) this.setMeta('network', network);
+    else if (boundNetwork !== network) throw Error(`NETWORK_MISMATCH_DB ${boundNetwork} != ${network}`);
     // Migration from the single-contract schema: add the column, then bind old rows to the contract that created them.
     for (const t of ['rounds', 'transitions'])
       if (!this.db.prepare(`PRAGMA table_info(${t})`).all().some(c => c.name === 'contract')) this.db.exec(`ALTER TABLE ${t} ADD COLUMN contract TEXT`);
@@ -74,11 +84,11 @@ export class Store {
     return this.db.prepare("SELECT * FROM rounds WHERE json_extract(data,'$.cid')=? AND status!='ROLLED_BACK' LIMIT 2").all(cid).map(rowRound);
   }
   cidPage(after, limit, category = null) {
-    // Same rule as api.mjs categoryOf (V2 family: kaswin-v2@, kaswin-v2.0.1@, kaswin-v2.0.2@). '.' is literal in LIKE.
-    const bucket = `CASE WHEN status='STALE' OR (contract NOT LIKE 'kaswin-f3@%' AND contract NOT LIKE 'kaswin-v2@%' AND contract NOT LIKE 'kaswin-v2.0.1@%' AND contract NOT LIKE 'kaswin-v2.0.2@%') THEN 'unknown'
+    // Same rule as api.mjs categoryOf: Kaswin V2.0.2 is the only supported contract family. '.' is literal in LIKE.
+    const bucket = `CASE WHEN status='STALE' OR contract NOT LIKE 'kaswin-v2.0.2@%' THEN 'unknown'
       WHEN status='TERMINAL' THEN 'close'
       WHEN json_extract(data,'$.state.phase')=1 THEN 'open'
-      WHEN json_extract(data,'$.state.phase')=2 OR (contract LIKE 'kaswin-f3@%' AND json_extract(data,'$.state.phase') IN (3,4)) THEN 'sealed'
+      WHEN json_extract(data,'$.state.phase')=2 THEN 'sealed'
       WHEN json_extract(data,'$.state.phase')=5 THEN 'close' ELSE 'unknown' END`;
     return this.db.prepare(`SELECT * FROM rounds WHERE json_extract(data,'$.cid')>? AND status!='ROLLED_BACK'
       AND (? IS NULL OR (${bucket})=?) ORDER BY json_extract(data,'$.cid'),id LIMIT ?`).all(after, category, category, limit).map(rowRound);

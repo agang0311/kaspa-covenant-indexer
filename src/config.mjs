@@ -1,4 +1,9 @@
 // Operator configuration only; does not change pinned contract rules.
+import {networkConfig} from './networks.mjs';
+
+/** Default REST hint oracle: the TN10 endpoint. indexer.mjs overrides this per network unless --rest-url is explicit. */
+export const DEFAULT_REST_URL = networkConfig('tn10').rest;
+
 export function runtimeOptions(cli, env = process.env) {
   const out = {...cli};
   const nodeKeys = ['url', 'urls', 'resolver', 'pool'];
@@ -21,11 +26,15 @@ export function runtimeOptions(cli, env = process.env) {
   const adminToken = cli['admin-token'] ?? env.KASPA_INDEXER_ADMIN_TOKEN ?? env.ADMIN_TOKEN;
   if (adminToken !== undefined) out['admin-token'] = adminToken;
   const rest = cli['rest-url'] ?? env.KASWIN_REST_URL ?? env.KASPA_REST_URL;
+  // restUrlExplicit distinguishes "operator chose a value (or disabled it)" from "use the selected network's own REST".
+  out.restUrlExplicit = rest !== undefined;
   if (rest !== undefined) {
     if (rest === 'none' || rest === 'false' || rest === 'off') out.restUrl = null;
     else out.restUrl = rest;
   } else {
-    out.restUrl = 'https://api-tn10.kaspa.org';
+    out.restUrl = DEFAULT_REST_URL;
   }
+  const networks = cli.networks ?? env.KASWIN_NETWORKS;
+  if (networks !== undefined) out.networks = networks;
   return out;
 }

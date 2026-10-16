@@ -64,9 +64,10 @@ export class ContractRegistry {
 
 /**
  * contracts.json:
- *   {"contracts": [{"module": "kaswin-f3.mjs" | "./path/x.mjs", "sha256": "<hex, optional pin>", "retired": false,
+ *   {"contracts": [{"module": "kaswin-v202.mjs" | "./path/x.mjs", "sha256": "<hex, optional pin>", "retired": false,
  *                   "options": {...plugin specific...}}]}
  * Bare names resolve in the built-in contracts/ dir; relative paths resolve against the config file.
+ * `ctx.network` selects the network context (registry address, genesis, prefix) injected into every plugin.
  */
 export async function loadContracts(configPath, ctx = {}) {
   const cfg = JSON.parse(fs.readFileSync(configPath, 'utf8'));
@@ -82,6 +83,7 @@ export async function loadContracts(configPath, ctx = {}) {
     if (typeof mod.create !== 'function') throw Error('CONTRACT_MODULE_WITHOUT_CREATE ' + c.module);
     const options = {...c.options};
     if (ctx.registryAddresses !== undefined) options.registryAddresses = ctx.registryAddresses;
+    if (ctx.networkGenesis !== undefined) options.networkGenesis = ctx.networkGenesis;
     const p = await mod.create(options, ctx);
     plugins.push(validatePlugin({...p, retired: c.retired === true, module: c.module, moduleSha256: sha, pinned: !!c.sha256}, `contracts[${i}]`));
   }

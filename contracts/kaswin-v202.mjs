@@ -1,13 +1,18 @@
 // Contract V2.0.2 plugin (Profile ed0387c9…): 80B ledger (KW21 named layout), in-transaction draw, 4 / 0.2 / 0.02 economics.
 // Requires an explicitly pinned LOCAL publication snapshot containing contracts/ and scripts/core/lib/;
-// never loads templates/cores from the network. Coexists with V2 and V2.0.1 plugins.
+// never loads templates/cores from the network.
+//
+// NETWORK NEUTRAL: the Profile, templates, ABI and CID derivation do not depend on the network (verified in
+// artifacts/v202/scripts/core/lib/state.js profileId(), which hashes only sourceSha256/templateHash/dispatchTag).
+// The only per-network fact is the discovery registry address, which is injected as a network context.
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {createV2RoundAdapter} from './v2-rounds.mjs';
 import {wireSpk} from '../src/normalize.mjs';
-import {registryScope, registrationOf, DEFAULT_REGISTRY_ADDRESS} from '../src/adapter/registry.mjs';
+import {registryScope, registrationOf} from '../src/adapter/registry.mjs';
+import {networkConfig, networkOfGenesis} from '../src/networks.mjs';
 
 const ACTIONS = {0x51: 'BUY', 0x52: 'CLOSE', 0x53: 'DRAW_AND_PAY', 0x54: 'TIMEOUT_REFUND', 0x55: 'REFUND', 81: 'BUY', 82: 'CLOSE', 84: 'DRAW_AND_PAY', 89: 'TIMEOUT_REFUND', 90: 'REFUND'};
 export function actionOf(tx) {
@@ -16,10 +21,11 @@ export function actionOf(tx) {
 }
 
 const HASH = /^[0-9a-f]{64}$/;
-const TN10_GENESIS = 'f896a3034873be1739fc4359236899fd3d65d2bc94f9780df0d0da3eb1cc4370';
 export const PROFILE_ID = 'ed0387c9e77bb4e0a8f1f4654a326c316d83663f455283ec6a046a095c94856d';
-export const NETWORK_GENESIS = TN10_GENESIS;
-export const REGISTRATION_SOMPI = '20000000';          // 0.2 TKAS
+export const CONTRACT_VERSION = 'V2.0.2';
+export const REGISTRATION_SOMPI = '20000000';          // 0.2 KAS
+/** Default network when the caller does not pin one (TN10). Kept as an export for tooling/tests. */
+export const NETWORK_GENESIS = networkConfig('tn10').genesis;
 export const CONTRACT_DIR = 'contracts', CORE_DIR = 'scripts/core/lib', BUNDLE_TOOL = 'scripts/contract/bundle.mjs';
 
 const hasBundle = d => fs.existsSync(path.join(d, CONTRACT_DIR, 'pins.json')) && fs.existsSync(path.join(d, CORE_DIR, 'state.js'));
@@ -44,10 +50,18 @@ export function coreDigest(repoDir) {
   return h.digest('hex');
 }
 
-export async function create(options = {}, {sdk} = {}) {
-  const o = {registryAddresses: [DEFAULT_REGISTRY_ADDRESS], registrationSompi: REGISTRATION_SOMPI, ...options, repoDir: resolveRepo(options.repoDir)};
+export async function create(options = {}, {sdk, network} = {}) {
+  const o = {...options, repoDir: resolveRepo(options.repoDir)};
   if (!HASH.test(o.profileId ?? '') || o.profileId === '00'.repeat(32)) throw Error('V202_PROFILE_PIN_REQUIRED');
-  if (o.networkGenesis !== TN10_GENESIS) throw Error('V202_TN10_PIN_REQUIRED');
+  // Network context resolution (fail closed, never falls back to another network):
+  //  1. an explicit `network` key/networkId, else 2. the network that owns the pinned genesis.
+  const net = network != null ? networkConfig(network)
+    : o.networkGenesis != null ? networkConfig(networkOfGenesis(o.networkGenesis) ?? o.networkGenesis)
+    : networkConfig('tn10');
+  o.networkGenesis = net.genesis;
+  o.network = net.key;
+  if (o.registryAddresses === undefined) o.registryAddresses = [net.registry];
+  o.registrationSompi = o.registrationSompi ?? REGISTRATION_SOMPI;
   if (typeof o.repoDir !== 'string' || !path.isAbsolute(o.repoDir) || !hasBundle(o.repoDir)) throw Error('V202_LOCAL_REPOSITORY_REQUIRED');
   if (String(o.registrationSompi) !== REGISTRATION_SOMPI) throw Error('V202_REGISTRATION_AMOUNT_PIN');
   if (!Array.isArray(o.registryAddresses)) throw Error('REGISTRY_ADDRESSES');
@@ -57,11 +71,14 @@ export async function create(options = {}, {sdk} = {}) {
   // loadBundle re-verifies template/linked sources, artifacts, constructor args, dependency hashes and the Profile id.
   const {loadBundle} = await load(BUNDLE_TOOL);
   const {pins, profile} = await loadBundle(path.join(o.repoDir, CONTRACT_DIR));
-  if (profile.id !== o.profileId || pins.networkGenesis !== o.networkGenesis || pins.contractVersion !== 'V2.0.2') throw Error('V202_UNPINNED_PROFILE');
+  if (profile.id !== o.profileId || pins.contractVersion !== CONTRACT_VERSION) throw Error('V202_UNPINNED_PROFILE');
   const [S, P, G, accepted, R] = await Promise.all(['state', 'protocol', 'genesis-discovery', 'accepted', 'registry'].map(m => load(`${CORE_DIR}/${m}.js`)));
   const headerBytes = S.HEADER_BYTES ?? S.HEADER ?? 80;
-  if (S.CONTRACT_VERSION !== 'V2.0.2' || headerBytes !== 80 || String(R.REGISTRATION_SOMPI) !== REGISTRATION_SOMPI) throw Error('V202_CORE_MISMATCH');
-  const scope = sdk && o.registryAddresses.length ? registryScope(sdk, o.registryAddresses) : [];
+  if (S.CONTRACT_VERSION !== CONTRACT_VERSION || headerBytes !== 80 || String(R.REGISTRATION_SOMPI) !== REGISTRATION_SOMPI) throw Error('V202_CORE_MISMATCH');
+  // Pure-JS registry scope: no SDK required (the address codec is local). The network's prefix is enforced.
+  const scope = o.registryAddresses.length ? registryScope(sdk, o.registryAddresses, o.network) : [];
+  // Bind the V2.0.2 registration amount (0.2 KAS). registry.mjs defaults to the legacy 0.05, so the amount MUST be
+  // pinned here rather than relying on the adapter's 3-argument call.
   const registration = (tx, sc, owner) => registrationOf(tx, sc, owner, REGISTRATION_SOMPI);
   const adapter = createV2RoundAdapter({S, G, accepted, profile, networkGenesis: o.networkGenesis, registryScope: scope, registrationOf: registration});
   const watch = new Set(scope.map(r => r.address)), fee = BigInt(REGISTRATION_SOMPI);
@@ -79,7 +96,8 @@ export async function create(options = {}, {sdk} = {}) {
       return {match: true};
     } catch (e) { return {match: false, reason: String(e?.message ?? e)}; }
   };
-  return {id: 'kaswin-v2.0.2', version: profile.id.slice(0, 16), profileId: profile.id, contractVersion: 'V2.0.2', coreSha256: digest,
+  return {id: 'kaswin-v2.0.2', version: profile.id.slice(0, 16), profileId: profile.id, contractVersion: CONTRACT_VERSION,
+    network: o.network, networkGenesis: o.networkGenesis, coreSha256: digest,
     watchAddresses: () => [...watch],
     discover: u => u.address && watch.has(u.address) && u.amount === fee && u.outpoint.index === 1 && (!u.covenantId || u.covenantId === S.ZERO) ? u.outpoint.transactionId : null,
     candidateGenesis: tx => typeof tx?.payload === 'string' && tx.payload.startsWith(prefix),

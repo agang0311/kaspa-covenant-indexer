@@ -32,7 +32,7 @@ export const DEFAULTS = Object.freeze({
   restUrl: null,                  // Spender hint oracle URL (e.g. 'https://api-tn10.kaspa.org')
 });
 
-export {actionOf} from '../contracts/kaswin-f3.mjs';   // compatibility re-export
+export {actionOf} from '../contracts/kaswin-v202.mjs';   // single supported contract version
 
 export class Engine {
   constructor({store, contracts, node, addressOf, config = {}, now = () => Date.now(), log = () => {}, fetchImpl}) {

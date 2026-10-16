@@ -1,18 +1,16 @@
-// Node pool selection for dual-node mode: probe candidate TN10 wRPC endpoints, drop bad ones, and pick two members that are
-// NOT the same backend (distinct p2pId). Measured 2026-09-30: 7 public hostnames resolved by kaspa-resolver, but 5 of them
-// (quark-10.red, electron-10.stream, neutrino-10.stream, electron-10.blue, proton-10.stream) report ONE p2pId, same peer count
-// and same sink -> one node behind several names. A "standby" on the same backend fails together with the primary.
+// Node pool selection for dual-node mode: probe candidate wRPC endpoints of ONE network, drop bad ones, and pick two
+// members that are NOT the same backend (distinct p2pId). Measured 2026-09-30 (TN10): 7 public hostnames resolved by
+// kaspa-resolver, but 5 of them report ONE p2pId, same peer count and same sink -> one node behind several names.
+// A "standby" on the same backend fails together with the primary. Measured 2026-10-16 (mainnet): 3 distinct p2pIds.
+import {networkConfig} from './networks.mjs';
 
-/** Seed list (TN10 public, as returned by kaspa-resolver on 2026-09-30). Resolver discovery adds to it at run time. */
-export const TN10_SEED = Object.freeze([
-  'wss://muon-10.kaspa.blue/kaspa/testnet-10/wrpc/json',
-  'wss://vector-10.kaspa.green/kaspa/testnet-10/wrpc/json',
-  'wss://quark-10.kaspa.red/kaspa/testnet-10/wrpc/json',
-  'wss://electron-10.kaspa.stream/kaspa/testnet-10/wrpc/json',
-  'wss://neutrino-10.kaspa.stream/kaspa/testnet-10/wrpc/json',
-  'wss://electron-10.kaspa.blue/kaspa/testnet-10/wrpc/json',
-  'wss://proton-10.kaspa.stream/kaspa/testnet-10/wrpc/json',
-]);
+/** Backwards-compatible TN10 seed export (kept for callers/tests that import it directly). */
+export const TN10_SEED = networkConfig('tn10').seed;
+
+/** Seed list for one network key. Fails closed on an unknown network. */
+export function seedFor(network) {
+  return networkConfig(network).seed;
+}
 
 /**
  * Probe all candidates in parallel. probe(url) -> {p2pId, blueScore(bigint), rttMs} or throws.
@@ -58,16 +56,21 @@ export function chooseReplacement(healthy, exclude) {
   return choosePair(healthy, {exclude})[0] ?? null;
 }
 
-/** Ask kaspa-resolver services for node URLs (each answer is one url). Best effort; failures ignored. */
-export async function discoverFromResolvers(resolverHosts, {rounds = 3, timeoutMs = 4000, fetchImpl = fetch} = {}) {
+/** Ask kaspa-resolver services for node URLs of ONE network (each answer is one url). Best effort; failures ignored. */
+export async function discoverFromResolvers(resolverHosts, {network = 'tn10', rounds = 3, timeoutMs = 4000, fetchImpl = fetch} = {}) {
+  const net = networkConfig(network);
   const found = new Set();
   const ask = async host => {
     const ac = new AbortController(), t = setTimeout(() => ac.abort(), timeoutMs); t.unref?.();
     try {
-      const r = await fetchImpl(`https://${host}/v2/kaspa/testnet-10/tls/wrpc/borsh`, {signal: ac.signal});
+      const r = await fetchImpl(`https://${host}/v2/kaspa/${net.resolverPath}/tls/wrpc/borsh`, {signal: ac.signal});
       if (!r.ok) return;
       const j = await r.json();
-      if (typeof j?.url === 'string' && /^wss:\/\/[a-z0-9.-]+\/kaspa\/testnet-10\/wrpc\/borsh$/.test(j.url)) found.add(j.url);
+      // Accept any wRPC transport (borsh or json) whose path names THIS network; the client normalises to /wrpc/json.
+      if (typeof j?.url === 'string' && /^wss:\/\/[a-z0-9.-]+\/kaspa\/[a-z0-9-]+\/wrpc\/(borsh|json)$/.test(j.url)) {
+        const urlNet = j.url.match(/\/kaspa\/([a-z0-9-]+)\/wrpc\//)?.[1];
+        if (urlNet === net.resolverPath) found.add(j.url);
+      }
     } catch {} finally { clearTimeout(t); }
   };
   for (let i = 0; i < rounds; i++) await Promise.all(resolverHosts.map(ask));

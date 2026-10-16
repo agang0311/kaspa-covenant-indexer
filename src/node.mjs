@@ -1,6 +1,7 @@
 // Native JSON wRPC Node Interface (Zero WASM SDK dependencies).
 import {JsonRpcClient} from './rpc.mjs';
 import {addressOfFactory, addressToSpk, spkToAddress} from './address.mjs';
+import {networkConfig} from './networks.mjs';
 
 export {addressOfFactory, addressToSpk, spkToAddress};
 
@@ -13,8 +14,9 @@ export async function openNode(sdkOrOpts, maybeOpts = {}) {
     log = () => {},
     connectDeadlineMs = null
   } = opts;
+  const net = networkConfig(network);
 
-  const rpc = new JsonRpcClient({url, networkId: network, timeoutDuration: timeoutMs});
+  const rpc = new JsonRpcClient({url, networkId: net.networkId, timeoutDuration: timeoutMs});
   const handlers = {connect: [], disconnect: [], utxos: [], chain: []};
   rpc.addEventListener('connect', () => handlers.connect.forEach(f => f()));
   rpc.addEventListener('disconnect', () => handlers.disconnect.forEach(f => f()));
@@ -39,7 +41,7 @@ export async function openNode(sdkOrOpts, maybeOpts = {}) {
     } else {
       await connecting;
     }
-    identity = await verifyNode(rpc, network);
+    identity = await verifyNode(rpc, net);
   } catch (e) {
     connecting.catch(() => {});
     try { await rpc.disconnect(); } catch {}
@@ -50,9 +52,10 @@ export async function openNode(sdkOrOpts, maybeOpts = {}) {
   const node = {
     rpc,
     identity,
+    network: net,
     url: rpc.url ?? null,
     on(kind, fn) { handlers[kind].push(fn); },
-    verify: async () => (node.identity = await verifyNode(rpc, network)),
+    verify: async () => (node.identity = await verifyNode(rpc, net)),
     subscribeUtxosChanged: addrs => rpc.subscribeUtxosChanged(addrs),
     unsubscribeUtxosChanged: addrs => rpc.unsubscribeUtxosChanged(addrs),
     subscribeVirtualChainChanged: () => rpc.subscribeVirtualChainChanged(false),
@@ -69,19 +72,34 @@ export async function openNode(sdkOrOpts, maybeOpts = {}) {
   return node;
 }
 
-async function verifyNode(rpc, network) {
+/**
+ * Fail-closed node identity check. All three facts must name the SAME network:
+ *  1. getServerInfo.networkId, 2. getBlockDagInfo.network, 3. the network table's pinned genesis.
+ * A node that answers on the wrong network must never be used: the same x-only key yields the same SPK on both
+ * networks (measured 2026-10-16), so a mixed pool would otherwise look like valid data.
+ */
+async function verifyNode(rpc, net) {
   const info = await rpc.getServerInfo();
-  if (info.networkId !== network) throw Error('WRONG_NETWORK_' + info.networkId);
+  if (info.networkId !== net.networkId) throw Error('WRONG_NETWORK_' + info.networkId);
   if (info.isSynced !== true) throw Error('NODE_NOT_SYNCED');
   if (info.hasUtxoIndex !== true) throw Error('NODE_WITHOUT_UTXOINDEX');
+  // getBlockDagInfo carries a `network` field on kaspad; when present it must agree as well.
+  try {
+    const dag = await rpc.getBlockDagInfo();
+    if (dag?.network != null && String(dag.network) !== net.networkId) throw Error('WRONG_NETWORK_DAG_' + dag.network);
+  } catch (e) {
+    if (/^WRONG_NETWORK_DAG_/.test(String(e?.message ?? ''))) throw e;
+  }
   let p2pId = null;
   try { p2pId = (await rpc.getInfo()).p2pId; } catch {}
   return {
+    network: net.key,
+    networkId: net.networkId,
+    genesis: net.genesis,
     url: rpc.url ?? null,
     nodeId: rpc.nodeId ?? null,
     p2pId,
     serverVersion: info.serverVersion,
-    networkId: info.networkId,
     isSynced: true,
     hasUtxoIndex: true,
     virtualDaaScore: info.virtualDaaScore ? info.virtualDaaScore.toString() : null,

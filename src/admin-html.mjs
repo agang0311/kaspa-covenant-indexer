@@ -635,6 +635,7 @@ input:focus, select:focus, textarea:focus {
     </div>
     <div class="header-status-line">
       <div id="headerStatusPill" class="status-pill"><span class="dot"></span><span id="pillText">连接中...</span></div>
+      <div id="networkSwitcher" style="display:none;"></div>
       <div id="headerDaaText" class="mono header-daa-text">选定链 DAA: --</div>
     </div>
   </header>
@@ -1080,13 +1081,22 @@ const p = window.location.pathname;
 const adminIdx = p.indexOf('/admin');
 const apiPrefix = (adminIdx > 0 ? p.slice(0, adminIdx) : '') + '/admin/api';
 
+// Selected network view (multi-network mode). Persisted so a reload keeps the operator's choice.
+let selectedNetwork = null;
+try { selectedNetwork = localStorage.getItem('kci.network') || null; } catch {}
+
+function withNetwork(path) {
+  if (!selectedNetwork) return path;
+  return path + (path.includes('?') ? '&' : '?') + 'network=' + encodeURIComponent(selectedNetwork);
+}
+
 async function api(path, method, body) {
   method = method || 'GET';
   const headers = { 'Accept': 'application/json' };
   if (currentToken) headers['Authorization'] = 'Bearer ' + currentToken;
   if (body) headers['Content-Type'] = 'application/json';
 
-  const res = await fetch(apiPrefix + path, {
+  const res = await fetch(apiPrefix + withNetwork(path), {
     method,
     headers,
     body: body ? JSON.stringify(body) : null
@@ -1109,16 +1119,34 @@ async function refreshAll() {
     const data = await api('/status');
     document.getElementById('authModal').style.display = 'none';
 
+    // Multi-network switcher: shown only when this process monitors more than one network.
+    const sw = document.getElementById('networkSwitcher');
+    const netKeys = data.networks || [];
+    if (sw && netKeys.length > 1) {
+      sw.style.display = 'inline-flex';
+      sw.innerHTML = netKeys.map(k =>
+        '<button class="btn btn-sm" type="button" data-net="' + k + '" style="padding:2px 8px;font-size:11px;' +
+        (k === (data.networkKey || netKeys[0]) ? 'border-color:var(--kaspa);color:var(--kaspa);' : 'opacity:.55;') +
+        '">' + k + '</button>').join('');
+      sw.querySelectorAll('button[data-net]').forEach(b => b.onclick = () => {
+        selectedNetwork = b.dataset.net;
+        try { localStorage.setItem('kci.network', selectedNetwork); } catch {}
+        refreshAll();
+      });
+    } else if (sw) { sw.style.display = 'none'; }
+
+    const netLabel = data.networkKey ? data.networkKey.toUpperCase() : 'TN10';
+
     // Header Pill
     const pill = document.getElementById('headerStatusPill');
     const pillText = document.getElementById('pillText');
     const daaText = document.getElementById('headerDaaText');
     if (data.activeNode && data.activeNode.isSynced) {
       pill.className = 'status-pill';
-      if (pillText) pillText.innerText = 'TN10 · 已同步';
+      if (pillText) pillText.innerText = netLabel + ' · 已同步';
     } else {
       pill.className = 'status-pill degraded';
-      if (pillText) pillText.innerText = 'TN10 · 追块/降级';
+      if (pillText) pillText.innerText = netLabel + ' · 追块/降级';
     }
     if (daaText) {
       const curDaa = data.activeNode?.virtualDaaScore || data.checkpoint?.virtualDaa;

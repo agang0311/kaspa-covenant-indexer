@@ -20,14 +20,14 @@ export function acceptanceOf(t, virtualDaa) {
   const acceptance = t.status === 'FINAL' ? 'FINAL' : depth >= REORG_RECHECK_DAA ? 'ACCEPTED' : 'CONFIRMING';
   return {acceptance, acceptingDaa: String(acceptingDaa), depthDaa: String(depth)};
 }
-/** Contract families whose live phases are exactly 1 (open), 2 (sealed), 5 (refunding): V2, V2.0.1 and V2.0.2. */
-export const V2_FAMILY = ['kaswin-v2@', 'kaswin-v2.0.1@', 'kaswin-v2.0.2@'];
+/** The only supported contract version is Kaswin V2.0.2. Live phases are exactly 1 (open), 2 (sealed), 5 (refunding). */
+export const CONTRACT_FAMILY = 'kaswin-v2.0.2@';
 export function categoryOf(r) {
-  const v2 = V2_FAMILY.some(p => r.contract?.startsWith(p));
-  if (r.status === 'STALE' || (!v2 && !r.contract?.startsWith('kaswin-f3@'))) return 'unknown';
+  const known = r.contract?.startsWith(CONTRACT_FAMILY);
+  if (r.status === 'STALE' || !known) return 'unknown';
   if (r.status === 'TERMINAL') return 'close';
   const p = r.data.state?.phase;
-  return p === 1 ? 'open' : (v2 ? p === 2 : [2, 3, 4].includes(p)) ? 'sealed' : p === 5 ? 'close' : 'unknown';
+  return p === 1 ? 'open' : p === 2 ? 'sealed' : p === 5 ? 'close' : 'unknown';
 }
 function view(r, detail = false, store = null, virtualDaa = null) {
   const d = r.data;
@@ -48,6 +48,7 @@ export function createApi({
   node = null,
   sdk = null,
   network = 'testnet-10',
+  networks = null,
   adminToken = null,
   contractsPath = null,
   openMember = null,
@@ -89,11 +90,11 @@ export function createApi({
       }
     }
 
-    // Admin dashboard & API handler
+    // Admin dashboard & API handler (multi-network views are passed through)
     if (url.pathname.startsWith('/admin')) {
       try {
         const handled = await handleAdmin(req, res, {
-          store, engine, contracts, node, sdk, network, adminToken, contractsPath, openMember, log
+          store, engine, contracts, node, sdk, network, networks, adminToken, contractsPath, openMember, log
         });
         if (handled) return;
       } catch (err) {
@@ -104,28 +105,37 @@ export function createApi({
 
     if (req.method !== 'GET') { res.setHeader('Allow', 'GET, OPTIONS'); send(405, {detail: 'METHOD_NOT_ALLOWED'}); return; }
     try {
-      const cp = store.checkpointsBefore(Date.now() + 1, 1)[0] ?? null, virtualDaa = cp?.virtualDaa ?? null;
-      const meta = {network: 'testnet-10', coverage: 'tracked-rounds-only', requiresIndependentVerification: true,
+      // Multi-network routing: ?network=<key> selects a network view; default is the first (primary) network.
+      // Each view is a fully separate Store/Engine, so no query can ever read another network's rows.
+      const views = new Map((networks ?? [{key: network, networkId: network, store, engine, contracts, node}]).map(v => [v.key, v]));
+      const requested = url.searchParams.get('network');
+      if (requested !== null && !views.has(requested)) return send(400, {detail: 'UNKNOWN_NETWORK', networks: [...views.keys()]});
+      const v = requested !== null ? views.get(requested) : views.values().next().value;
+      const vStore = v.store, vEngine = v.engine, vContracts = v.contracts, vNode = v.node;
+      const net = {key: v.key, networkId: v.networkId ?? network, genesis: v.genesis ?? null, label: v.label ?? null, rest: v.rest ?? null, registry: v.registry ?? null};
+      const cp = vStore.checkpointsBefore(Date.now() + 1, 1)[0] ?? null, virtualDaa = cp?.virtualDaa ?? null;
+      const meta = {network: net.networkId, networkKey: net.key, networkGenesis: net.genesis, networks: [...views.keys()],
+        coverage: 'tracked-rounds-only', requiresIndependentVerification: true,
         lastCheckpointAt: cp?.at ?? null, virtualDaa: virtualDaa == null ? null : String(virtualDaa), reorgRecheckDaa: String(REORG_RECHECK_DAA),
-        discoveryCoverage: 'notification-or-manual-only', discoveryScan: {enabled: false}, discoveryPending: store.db.prepare("SELECT COUNT(*) n FROM discoveries WHERE status='PENDING'").get().n};
+        discoveryCoverage: 'notification-or-manual-only', discoveryScan: {enabled: false}, discoveryPending: vStore.db.prepare("SELECT COUNT(*) n FROM discoveries WHERE status='PENDING'").get().n};
       const match = /^\/v1\/rounds\/([^/]+)$/.exec(url.pathname);
       if (match) {
-        if (!HASH.test(match[1]) || url.search) return send(400, {detail: 'INVALID_CID_OR_QUERY'});
-        const rows = store.byCid(match[1]);
+        if (!HASH.test(match[1]) || [...url.searchParams.keys()].some(k => k !== 'network')) return send(400, {detail: 'INVALID_CID_OR_QUERY'});
+        const rows = vStore.byCid(match[1]);
         if (!rows.length) return send(404, {detail: 'NOT_INDEXED', ...meta});
         if (rows.length > 1) return send(409, {detail: 'CID_CONFLICT'});
-        return send(200, {item: view(rows[0], true, store, virtualDaa), ...meta});
+        return send(200, {item: view(rows[0], true, vStore, virtualDaa), ...meta});
       }
       if (url.pathname !== '/v1/rounds') return send(404, {detail: 'NOT_FOUND'});
-      for (const key of url.searchParams.keys()) if (!['status', 'limit', 'cursor'].includes(key) || url.searchParams.getAll(key).length !== 1)
+      for (const key of url.searchParams.keys()) if (!['status', 'limit', 'cursor', 'network'].includes(key) || url.searchParams.getAll(key).length !== 1)
         return send(400, {detail: 'INVALID_QUERY'});
       const status = url.searchParams.get('status'), cursor = url.searchParams.get('cursor') ?? '', rawLimit = url.searchParams.get('limit') ?? '50';
       if ((status !== null && !['open', 'sealed', 'close', 'unknown'].includes(status)) ||
           (cursor && !HASH.test(cursor)) || !/^[1-9][0-9]{0,2}$/.test(rawLimit) || Number(rawLimit) > 200)
         return send(400, {detail: 'INVALID_QUERY'});
-      const limit = Number(rawLimit), rows = store.cidPage(cursor, limit + 1, status), page = rows.slice(0, limit);
-      if (page.some(r => store.byCid(r.data.cid).length > 1)) return send(409, {detail: 'CID_CONFLICT'});
-      return send(200, {items: page.map(r => view(r, false, store, virtualDaa)), nextCursor: rows.length > limit ? page.at(-1).data.cid : null, ...meta});
+      const limit = Number(rawLimit), rows = vStore.cidPage(cursor, limit + 1, status), page = rows.slice(0, limit);
+      if (page.some(r => vStore.byCid(r.data.cid).length > 1)) return send(409, {detail: 'CID_CONFLICT'});
+      return send(200, {items: page.map(r => view(r, false, vStore, virtualDaa)), nextCursor: rows.length > limit ? page.at(-1).data.cid : null, ...meta});
     } catch { send(500, {detail: 'INTERNAL_ERROR'}); }
   });
   server.requestTimeout = 10000; server.headersTimeout = 10000;

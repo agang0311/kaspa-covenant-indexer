@@ -7,7 +7,7 @@ import {categoryOf} from './api.mjs';
 import {loadContracts} from './contracts.mjs';
 import {compileSilverScript} from './compiler.mjs';
 import {generatePluginCode} from './generator.mjs';
-import {TN10_SEED} from './node-pool.mjs';
+import {seedFor} from './node-pool.mjs';
 import {traceAndTrackTxid} from './tracer.mjs';
 import {JsonRpcClient} from './rpc.mjs';
 
@@ -52,7 +52,15 @@ export function readBody(req, limit = 1024 * 1024) {
 }
 
 export async function handleAdmin(req, res, ctx) {
-  const {store, engine, contracts, node, sdk, network = 'testnet-10', adminToken, contractsPath, openMember, log = () => {}} = ctx;
+  const {store, engine, contracts, node, sdk, network = 'testnet-10', networks = null, adminToken, contractsPath, openMember, log = () => {}} = ctx;
+  // Multi-network: ?network=<key> selects the view; default is the primary (first) network.
+  const viewKeys = (networks ?? []).map(v => v.key);
+  const pickView = raw => {
+    if (!networks?.length) return {store, engine, contracts, node, network, key: null, networkId: network, genesis: null, label: null, rest: null, registry: null};
+    if (raw != null && !viewKeys.includes(raw)) return null;
+    const v = raw != null ? networks.find(x => x.key === raw) : networks[0];
+    return {...v, network: v.networkId, networkId: v.networkId};
+  };
   const url = new URL(req.url, 'http://localhost');
   const pathname = url.pathname;
 
@@ -103,8 +111,24 @@ export async function handleAdmin(req, res, ctx) {
       }
     }
 
+    // 0. Network catalog (read-only, open): which networks this process monitors.
+    if (sub === '/networks' && req.method === 'GET') {
+      send(200, {ok: true, networks: (networks ?? [{key: null, networkId: network}]).map(v => ({
+        key: v.key, label: v.label ?? null, networkId: v.networkId, genesis: v.genesis ?? null,
+        rest: v.rest ?? null, registry: v.registry ?? null,
+        rounds: v.store ? v.store.rounds().length : null,
+        live: v.store ? v.store.rounds({liveOnly: true}).length : null,
+        activeNode: v.node?.identity ?? null,
+      }))});
+      return true;
+    }
+
     // 1. Status Overview
     if (sub === '/status' && req.method === 'GET') {
+      const view = pickView(url.searchParams.get('network'));
+      if (!view) { send(400, {ok: false, error: 'UNKNOWN_NETWORK', networks: viewKeys}); return true; }
+      const {store, engine, contracts, node} = view;
+      const network = view.networkId;
       const mem = process.memoryUsage();
       const allRounds = store.rounds();
       const liveRounds = store.rounds({liveOnly: true});
@@ -127,6 +151,9 @@ export async function handleAdmin(req, res, ctx) {
           heapTotalMb: +(mem.heapTotal / 1024 / 1024).toFixed(1),
         },
         network,
+        networkKey: view.key ?? null,
+        networkGenesis: view.genesis ?? null,
+        networks: viewKeys.length ? viewKeys : null,
         activeNode: {
           url: activeNode?.url ?? node?.url,
           p2pId: activeNode?.p2pId,
@@ -136,8 +163,8 @@ export async function handleAdmin(req, res, ctx) {
           virtualDaaScore: activeNode?.virtualDaaScore?.toString()
         },
         rest: {
-          url: engine?.config?.restUrl ?? null,
-          enabled: Boolean(engine?.config?.restUrl)
+          url: engine?.config?.restUrl ?? view.rest ?? null,
+          enabled: Boolean(engine?.config?.restUrl ?? view.rest)
         },
         nodePool: nodeStatus,
         rounds: {
@@ -164,15 +191,20 @@ export async function handleAdmin(req, res, ctx) {
 
     // Node Pool & Candidates API
     if (sub === '/node-pool' && req.method === 'GET') {
+      const view = pickView(url.searchParams.get('network'));
+      if (!view) { send(400, {ok: false, error: 'UNKNOWN_NETWORK', networks: viewKeys}); return true; }
+      const node = view.node;
       const members = typeof node?.status === 'function' ? node.status() : [{url: node?.url ?? node?.identity?.url, up: true, active: true}];
       send(200, {
         ok: true,
-        seeds: TN10_SEED,
+        network: view.networkId,
+        networkKey: view.key ?? null,
+        seeds: seedFor(view.key ?? 'tn10'),
         members,
         active: node?.identity ?? null,
         rest: {
-          url: engine?.config?.restUrl ?? null,
-          enabled: Boolean(engine?.config?.restUrl)
+          url: engine?.config?.restUrl ?? view.rest ?? null,
+          enabled: Boolean(engine?.config?.restUrl ?? view.rest)
         }
       });
       return true;
@@ -255,11 +287,16 @@ export async function handleAdmin(req, res, ctx) {
 
     if (sub === '/probe-pool' && req.method === 'POST') {
       try {
+        const view = pickView(url.searchParams.get('network'));
+        if (!view) { send(400, {ok: false, error: 'UNKNOWN_NETWORK', networks: viewKeys}); return true; }
+        const netKey = view.key ?? 'tn10';
+        const network = view.networkId;
+        const node = view.node;
         const body = await readBody(req).catch(() => ({}));
         const customCandidates = Array.isArray(body?.urls) ? body.urls : [];
         const targets = [...new Set([
           ...customCandidates,
-          ...TN10_SEED,
+          ...seedFor(netKey),
           ...(typeof node?.status === 'function' ? node.status().map(m => m.url) : [node?.url]).filter(Boolean)
         ])].filter(u => typeof u === 'string' && /^wss?:\/\//i.test(u));
 
