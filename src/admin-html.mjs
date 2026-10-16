@@ -890,7 +890,10 @@ input:focus, select:focus, textarea:focus {
           由 SQLite 原子记录的 Kaspa 链上 Covenant 状态机演进日志：包含交易接受（APPLIED）、UTXO 花费（SPENT_EVENT）、链重组回退（ROLLBACK）与节点异常（ERROR）。
         </div>
       </div>
-      <button class="btn btn-sm" id="btnRefreshJournal">🔄 刷新流水</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn btn-pri btn-sm" id="btnRecheckDiscoveries" title="重新复审所有未匹配的历史创世任务">⚡ 重新复审历史创世并自动追块</button>
+        <button class="btn btn-sm" id="btnRefreshJournal">🔄 刷新流水</button>
+      </div>
     </div>
 
     <div id="journalFeed" class="journal-feed">
@@ -1238,11 +1241,13 @@ function renderJournalFeed(logs) {
       kindLabel = '⚪ 忽略其他版本创世 (Unmatched Genesis)';
       const reasonText = d.reason === 'no pinned creation template matched' ? 'Profile 版本指纹不属于当前活动契约' : (d.reason || '模版不匹配');
       const rejText = Array.isArray(d.rejected) ? d.rejected.map(r => (r.contract ? r.contract.slice(0, 24) + '...' : '契约') + ': ' + (r.reason || '不匹配')).join('; ') : '';
+      const btnTrack = d.txid ? ('<div style="margin-top:8px;"><button class="btn btn-sm" style="padding:3px 10px;font-size:11px;" onclick="trackGenesis(\'' + d.txid + '\')">🎯 让索引器自动追此轮</button></div>') : '';
       bodyHtml = '<div class="journal-grid">' +
         '<div class="journal-field"><span class="journal-field-label">创世 TXID:</span><span class="journal-field-val mono">' + (d.txid ? d.txid.slice(0, 16) + '...' : '-') + '</span></div>' +
         '<div class="journal-field"><span class="journal-field-label">过滤说明:</span><span class="journal-field-val" style="color:var(--muted);">' + reasonText + '</span></div>' +
       '</div>' +
-      (rejText ? '<div class="mono" style="font-size:11px;color:var(--dim);margin-top:4px;word-break:break-all;overflow-wrap:anywhere;">拒绝详情: ' + rejText + '</div>' : '');
+      (rejText ? '<div class="mono" style="font-size:11px;color:var(--dim);margin-top:4px;word-break:break-all;overflow-wrap:anywhere;">拒绝详情: ' + rejText + '</div>' : '') +
+      btnTrack;
     } else if (l.kind === 'ERROR') {
       tagClass = 'tag-rose';
       borderStyle = 'border-left: 3px solid var(--rose);';
@@ -1272,6 +1277,32 @@ function renderJournalFeed(logs) {
 document.getElementById('btnRefreshJournal').onclick = () => {
   refreshAll();
   showToast('已拉取最新审计流水');
+};
+
+window.trackGenesis = async function(txid) {
+  try {
+    const res = await api('/track', 'POST', {txid});
+    showToast('已提交给索引器，后台正在自动追块...', 'var(--emerald)');
+    setTimeout(refreshAll, 1500);
+  } catch (e) {
+    showToast('追块提交失败: ' + e.message, 'var(--rose)');
+  }
+};
+
+document.getElementById('btnRecheckDiscoveries').onclick = async () => {
+  const btn = document.getElementById('btnRecheckDiscoveries');
+  btn.disabled = true;
+  btn.innerText = '正在触发索引器自动追块...';
+  try {
+    const res = await api('/recheck-discoveries', 'POST', {});
+    showToast(res.message || '已触发索引器自动追块', 'var(--emerald)');
+    setTimeout(refreshAll, 2000);
+  } catch (e) {
+    showToast('追块触发失败: ' + e.message, 'var(--rose)');
+  } finally {
+    btn.disabled = false;
+    btn.innerText = '⚡ 重新复审历史创世并自动追块';
+  }
 };
 
 // 2. Node Pool Benchmark

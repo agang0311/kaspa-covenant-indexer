@@ -211,6 +211,41 @@ export async function handleAdmin(req, res, ctx) {
       return true;
     }
 
+    // Recheck Ignored Discoveries (Automatic Catchup Trigger)
+    if (sub === '/recheck-discoveries' && req.method === 'POST') {
+      const reset = store.db.prepare("UPDATE discoveries SET status='PENDING', error=NULL WHERE status='IGNORED'").run();
+      if (engine && typeof engine.retryPending === 'function') {
+        engine.retryPending();
+      }
+      send(200, {
+        ok: true,
+        recheckedCount: reset.changes,
+        message: `已重置 ${reset.changes} 条历史创世任务为 PENDING，索引器已触发全自动追块`
+      });
+      return true;
+    }
+
+    // Manual / Targeted Track Genesis TXID
+    if (sub === '/track' && req.method === 'POST') {
+      const body = await readBody(req).catch(() => ({}));
+      const txid = body?.txid?.trim();
+      if (!txid || !/^[0-9a-f]{64}$/i.test(txid)) {
+        send(400, {ok: false, error: 'INVALID_TXID', detail: '请输入合法的 64 位十六进制 Genesis 交易哈希'});
+        return true;
+      }
+      store.discoverTask(txid, {eventAt: Date.now()}, Date.now());
+      store.db.prepare("UPDATE discoveries SET status='PENDING', error=NULL WHERE txid=?").run(txid);
+      if (engine && typeof engine.retryPending === 'function') {
+        engine.retryPending();
+      }
+      send(200, {
+        ok: true,
+        txid,
+        message: `已提交给索引器，后台已自动启动追块与花费者追踪`
+      });
+      return true;
+    }
+
     if (sub === '/probe-pool' && req.method === 'POST') {
       try {
         const body = await readBody(req).catch(() => ({}));
