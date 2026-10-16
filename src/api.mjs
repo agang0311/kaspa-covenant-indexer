@@ -80,8 +80,8 @@ export function createApi({
     // Public status endpoints (aliased to status handler, completely open & unauthenticated)
     if (url.pathname === '/status' || url.pathname === '/v1/status') {
       try {
-        const handled = await handleAdmin(Object.assign(Object.create(req), {url: '/admin/api/status'}), res, {
-          store, engine, contracts, node, sdk, network, adminToken, contractsPath, openMember, log
+        const handled = await handleAdmin(Object.assign(Object.create(req), {url: '/admin/api/status' + url.search}), res, {
+          store, engine, contracts, node, sdk, network, networks, adminToken, contractsPath, openMember, log
         });
         if (handled) return;
       } catch (err) {
@@ -105,20 +105,59 @@ export function createApi({
 
     if (req.method !== 'GET') { res.setHeader('Allow', 'GET, OPTIONS'); send(405, {detail: 'METHOD_NOT_ALLOWED'}); return; }
     try {
-      // Multi-network routing: ?network=<key> selects a network view; default is the first (primary) network.
-      // Each view is a fully separate Store/Engine, so no query can ever read another network's rows.
-      const views = new Map((networks ?? [{key: network, networkId: network, store, engine, contracts, node}]).map(v => [v.key, v]));
-      const requested = url.searchParams.get('network');
-      if (requested !== null && !views.has(requested)) return send(400, {detail: 'UNKNOWN_NETWORK', networks: [...views.keys()]});
-      const v = requested !== null ? views.get(requested) : views.values().next().value;
+      // Multi-network catalog: build lookup index by network key ('tn10', 'mainnet') and networkId ('testnet-10').
+      const netList = networks ?? [{key: 'tn10', networkId: network, store, engine, contracts, node}];
+      const views = new Map();
+      for (const v of netList) {
+        views.set(v.key, v);
+        if (v.networkId && v.networkId !== v.key) views.set(v.networkId, v);
+      }
+      const primaryKey = netList[0]?.key ?? 'tn10';
+      const availableKeys = [...new Set(netList.map(v => v.key))];
+
+      // Public Networks Catalog Discovery: GET /v1/networks
+      if (url.pathname === '/v1/networks') {
+        return send(200, {
+          ok: true,
+          defaultNetwork: primaryKey,
+          networks: netList.map(v => ({
+            key: v.key,
+            label: v.label ?? null,
+            networkId: v.networkId ?? v.key,
+            genesis: v.genesis ?? null,
+            rest: v.rest ?? null,
+            registry: v.registry ?? null,
+            rounds: v.store ? v.store.rounds().length : 0,
+            live: v.store ? v.store.rounds({liveOnly: true}).length : 0,
+            activeNode: v.node?.identity?.url ?? null,
+            virtualDaaScore: v.node?.identity?.virtualDaaScore ?? null
+          }))
+        });
+      }
+
+      // Multi-network routing: support both query parameter ?network=<key> and path prefix /v1/<network>/rounds...
+      let pathname = url.pathname;
+      let pathNetwork = null;
+      const pathNetMatch = /^\/v1\/([a-z0-9_-]+)\/(rounds(?:\/[0-9a-f]{64})?)$/.exec(pathname);
+      if (pathNetMatch && views.has(pathNetMatch[1])) {
+        pathNetwork = pathNetMatch[1];
+        pathname = '/v1/' + pathNetMatch[2];
+      }
+
+      const requested = pathNetwork || url.searchParams.get('network');
+      if (requested !== null && !views.has(requested)) {
+        return send(400, {detail: 'UNKNOWN_NETWORK', networks: availableKeys});
+      }
+
+      const v = requested !== null ? views.get(requested) : netList[0];
       const vStore = v.store, vEngine = v.engine, vContracts = v.contracts, vNode = v.node;
       const net = {key: v.key, networkId: v.networkId ?? network, genesis: v.genesis ?? null, label: v.label ?? null, rest: v.rest ?? null, registry: v.registry ?? null};
       const cp = vStore.checkpointsBefore(Date.now() + 1, 1)[0] ?? null, virtualDaa = cp?.virtualDaa ?? null;
-      const meta = {network: net.networkId, networkKey: net.key, networkGenesis: net.genesis, networks: [...views.keys()],
+      const meta = {network: net.networkId, networkKey: net.key, networkGenesis: net.genesis, networks: availableKeys,
         coverage: 'tracked-rounds-only', requiresIndependentVerification: true,
         lastCheckpointAt: cp?.at ?? null, virtualDaa: virtualDaa == null ? null : String(virtualDaa), reorgRecheckDaa: String(REORG_RECHECK_DAA),
         discoveryCoverage: 'notification-or-manual-only', discoveryScan: {enabled: false}, discoveryPending: vStore.db.prepare("SELECT COUNT(*) n FROM discoveries WHERE status='PENDING'").get().n};
-      const match = /^\/v1\/rounds\/([^/]+)$/.exec(url.pathname);
+      const match = /^\/v1\/rounds\/([^/]+)$/.exec(pathname);
       if (match) {
         if (!HASH.test(match[1]) || [...url.searchParams.keys()].some(k => k !== 'network')) return send(400, {detail: 'INVALID_CID_OR_QUERY'});
         const rows = vStore.byCid(match[1]);
@@ -126,7 +165,7 @@ export function createApi({
         if (rows.length > 1) return send(409, {detail: 'CID_CONFLICT'});
         return send(200, {item: view(rows[0], true, vStore, virtualDaa), ...meta});
       }
-      if (url.pathname !== '/v1/rounds') return send(404, {detail: 'NOT_FOUND'});
+      if (pathname !== '/v1/rounds') return send(404, {detail: 'NOT_FOUND'});
       for (const key of url.searchParams.keys()) if (!['status', 'limit', 'cursor', 'network'].includes(key) || url.searchParams.getAll(key).length !== 1)
         return send(400, {detail: 'INVALID_QUERY'});
       const status = url.searchParams.get('status'), cursor = url.searchParams.get('cursor') ?? '', rawLimit = url.searchParams.get('limit') ?? '50';
