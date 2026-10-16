@@ -74,8 +74,8 @@ export class Store {
     return this.db.prepare("SELECT * FROM rounds WHERE json_extract(data,'$.cid')=? AND status!='ROLLED_BACK' LIMIT 2").all(cid).map(rowRound);
   }
   cidPage(after, limit, category = null) {
-    // Same rule as api.mjs categoryOf (V2 family: kaswin-v2@, kaswin-v2.0.1@). '.' is literal in LIKE.
-    const bucket = `CASE WHEN status='STALE' OR (contract NOT LIKE 'kaswin-f3@%' AND contract NOT LIKE 'kaswin-v2@%' AND contract NOT LIKE 'kaswin-v2.0.1@%') THEN 'unknown'
+    // Same rule as api.mjs categoryOf (V2 family: kaswin-v2@, kaswin-v2.0.1@, kaswin-v2.0.2@). '.' is literal in LIKE.
+    const bucket = `CASE WHEN status='STALE' OR (contract NOT LIKE 'kaswin-f3@%' AND contract NOT LIKE 'kaswin-v2@%' AND contract NOT LIKE 'kaswin-v2.0.1@%' AND contract NOT LIKE 'kaswin-v2.0.2@%') THEN 'unknown'
       WHEN status='TERMINAL' THEN 'close'
       WHEN json_extract(data,'$.state.phase')=1 THEN 'open'
       WHEN json_extract(data,'$.state.phase')=2 OR (contract LIKE 'kaswin-f3@%' AND json_extract(data,'$.state.phase') IN (3,4)) THEN 'sealed'

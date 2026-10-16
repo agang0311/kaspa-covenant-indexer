@@ -1,4 +1,4 @@
-// SDK 2.0.1 RpcClient via kaspa-resolver (or an explicit URL, never both). Read-only: no submit, no wallet.
+// SDK 2.1.0 RpcClient via kaspa-resolver (or an explicit URL, never both). Read-only: no submit, no wallet.
 // strategy 'fallback' + connectDeadlineMs: fail fast and dispose the client (used by dual-node members, which reconnect
 // themselves; measured 2026-09-30: a connect against a refusing endpoint may hang past timeoutDuration).
 export async function openNode(sdk, {network = 'testnet-10', url = null, resolverUrls = null, tls = undefined, timeoutMs = 15000, log = () => {},

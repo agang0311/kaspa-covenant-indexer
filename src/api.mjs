@@ -20,8 +20,8 @@ export function acceptanceOf(t, virtualDaa) {
   const acceptance = t.status === 'FINAL' ? 'FINAL' : depth >= REORG_RECHECK_DAA ? 'ACCEPTED' : 'CONFIRMING';
   return {acceptance, acceptingDaa: String(acceptingDaa), depthDaa: String(depth)};
 }
-/** Contract families whose live phases are exactly 1 (open), 2 (sealed), 5 (refunding): V2 and contract V2.0.1. */
-export const V2_FAMILY = ['kaswin-v2@', 'kaswin-v2.0.1@'];
+/** Contract families whose live phases are exactly 1 (open), 2 (sealed), 5 (refunding): V2, V2.0.1 and V2.0.2. */
+export const V2_FAMILY = ['kaswin-v2@', 'kaswin-v2.0.1@', 'kaswin-v2.0.2@'];
 export function categoryOf(r) {
   const v2 = V2_FAMILY.some(p => r.contract?.startsWith(p));
   if (r.status === 'STALE' || (!v2 && !r.contract?.startsWith('kaswin-f3@'))) return 'unknown';
