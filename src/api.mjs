@@ -76,6 +76,19 @@ export function createApi({
 
     const url = new URL(req.url, 'http://localhost');
 
+    // Public status endpoints (aliased to status handler, completely open & unauthenticated)
+    if (url.pathname === '/status' || url.pathname === '/v1/status') {
+      try {
+        const handled = await handleAdmin(Object.assign(Object.create(req), {url: '/admin/api/status'}), res, {
+          store, engine, contracts, node, sdk, network, adminToken, contractsPath, openMember, log
+        });
+        if (handled) return;
+      } catch (err) {
+        send(500, {ok: false, error: 'STATUS_ERROR', detail: err.message});
+        return;
+      }
+    }
+
     // Admin dashboard & API handler
     if (url.pathname.startsWith('/admin')) {
       try {

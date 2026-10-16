@@ -75,13 +75,31 @@ export async function handleAdmin(req, res, ctx) {
 
   // Admin API routes
   if (pathname.startsWith('/admin/api/')) {
-    // Check Auth
-    if (!verifyAdminToken(req, adminToken)) {
-      send(401, {ok: false, error: 'UNAUTHORIZED', detail: 'Invalid or missing Admin Token'});
+    const sub = pathname.replace('/admin/api', '');
+
+    // Token verification endpoint
+    if (sub === '/verify-token' && req.method === 'POST') {
+      const valid = verifyAdminToken(req, adminToken);
+      send(valid ? 200 : 401, {ok: valid});
       return true;
     }
 
-    const sub = pathname.replace('/admin/api', '');
+    // Only actual management mutations require admin password
+    const MANAGEMENT_MUTATIONS = new Set([
+      '/plugins/toggle',
+      '/plugins/update-config',
+      '/plugins/remove',
+      '/compile',
+      '/generate-plugin',
+      '/install-plugin'
+    ]);
+
+    if (MANAGEMENT_MUTATIONS.has(sub)) {
+      if (!verifyAdminToken(req, adminToken)) {
+        send(401, {ok: false, error: 'UNAUTHORIZED', detail: '管理操作需要管理员密码'});
+        return true;
+      }
+    }
 
     // 1. Status Overview
     if (sub === '/status' && req.method === 'GET') {

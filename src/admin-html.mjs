@@ -990,6 +990,19 @@ if (urlToken) {
   sessionStorage.setItem('kci_admin_token', urlToken);
 }
 
+function updateAuthUI() {
+  const btn = document.getElementById('btnLogout');
+  if (!btn) return;
+  if (currentToken) {
+    btn.innerHTML = '🔓<span class="btn-text"> 管理已解锁</span>';
+    btn.style.color = 'var(--emerald)';
+  } else {
+    btn.innerHTML = '🔐<span class="btn-text"> 登录管理</span>';
+    btn.style.color = 'var(--text)';
+  }
+}
+updateAuthUI();
+
 function showToast(text, color) {
   const el = document.getElementById('toastMsg');
   el.innerText = text;
@@ -1834,14 +1847,24 @@ document.getElementById('authForm').onsubmit = async e => {
   e.preventDefault();
   const token = document.getElementById('inputAdminToken').value.trim();
   if (token) {
-    currentToken = token;
-    sessionStorage.setItem('kci_admin_token', token);
     try {
-      await refreshAll();
-      showToast('登录成功！', 'var(--emerald)');
+      const chk = await fetch(apiPrefix + '/verify-token', {
+        method: 'POST',
+        headers: {'Authorization': 'Bearer ' + token}
+      });
+      if (!chk.ok) throw new Error('WRONG_PASSWORD');
+      currentToken = token;
+      sessionStorage.setItem('kci_admin_token', token);
+      updateAuthUI();
+      showToast('管理员已解锁！', 'var(--emerald)');
       document.getElementById('authModal').style.display = 'none';
+      if (window._pendingAction) {
+        const action = window._pendingAction;
+        window._pendingAction = null;
+        action();
+      }
     } catch (err) {
-      showToast('Token 无效，请重新输入', 'var(--rose)');
+      showToast('密码错误，请重新输入', 'var(--rose)');
     }
   }
 };
