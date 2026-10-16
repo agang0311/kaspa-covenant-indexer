@@ -124,14 +124,18 @@ header {
   font-weight: 700;
   color: var(--text);
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   min-width: 0;
 }
-.title-short { display: none; }
-@media (max-width: 520px) {
-  .title-full { display: none; }
-  .title-short { display: inline; }
+@media (max-width: 440px) {
+  .brand-title {
+    font-size: 12.5px;
+    letter-spacing: -0.2px;
+  }
+}
+@media (max-width: 360px) {
+  .brand-title {
+    font-size: 11.5px;
+  }
 }
 .header-btns {
   display: flex;
@@ -611,7 +615,7 @@ input:focus, select:focus, textarea:focus {
       <div class="brand">
         <span class="logo-badge">KCI</span>
         <span class="version-badge" id="appVersionBadge">v0.1.1</span>
-        <span class="brand-title"><span class="title-full">Kaspa Covenant Indexer</span><span class="title-short">Kaspa Indexer</span></span>
+        <span class="brand-title">Kaspa Covenant Indexer</span>
       </div>
       <div class="header-btns">
         <button class="btn btn-header" id="btnRefresh" title="刷新状态">🔄<span class="btn-text"> 刷新</span></button>
