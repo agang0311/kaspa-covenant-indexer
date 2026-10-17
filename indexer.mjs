@@ -81,7 +81,7 @@ async function openNetwork(net, {multi}) {
     return [...new Set([...managed(), ...extra, ...seedFor(net.key), ...found])];
   };
   let node;
-  const maxLag = net.key === 'tn10' ? 600n : 300n;
+  const maxLag = net.key === 'tn10' ? 3000n : 600n;
   const electPair = async () => {
     const pool = await probePool(await candidates(), probe, {maxLag});
     const pair = choosePair(pool.healthy);

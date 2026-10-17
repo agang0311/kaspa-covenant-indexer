@@ -17,7 +17,7 @@ export const DEFAULTS = Object.freeze({
   // Fast path: one V2 Full page from a checkpoint shortly before the event gives spender, accepting header and the
   // accepted full transaction in one RPC. Any miss/error falls back to the slow path below. Measured 2026-09-30
   // (TN10, vector-10/muon-10): ~0.8-2.4 s for 40-150 chain blocks; RTT ~0.3 s per call.
-  fastLookbackMs: 10000,
+  fastLookbackMs: 4000,
   fastMaxAgeMs: 30000,            // older start -> page too large for the 192 MB heap (VPS); use slow path
   fastMaxPages: 2,
   // Bounded fallback (2026-10-10): accepted-transaction pages of at most this many blue score, one page in memory at a
@@ -723,21 +723,17 @@ export class Engine {
     }
     const from = starts ?? this.store.checkpointsBefore(eventAt - this.config.genesisLookbackMs, this.config.checkpointsPerSearch).map(c => c.sink);
     if (!from.length && this.store.getMeta('discoveryScan')?.anchor) from.push(this.store.getMeta('discoveryScan').anchor);
-    if (this.config.restUrl && !starts) {
+    // 1. Try local DAG acceptance directly if we have checkpoints (fast, purely on-node, avoids REST lag).
+    let acc = from.length ? await this.acceptance(txid, from).catch(() => null) : null;
+    // 2. If not found in recent checkpoints and REST is configured, ask REST for an older anchor hint.
+    if (!acc && this.config.restUrl && !starts) {
       const hint = await this.genesisFromRest(txid);
-      if (hint?.notFound) {
-        // Public REST indexers typically lag live P2P DAG by 5-15 seconds. Never prematurely mark IGNORED
-        // on a brand-new live event based solely on a temporary REST 404.
-        if (!from.length) {
-          return this.defer('genesis:' + txid, {kind: 'genesis', id: txid, hint: {eventAt, daa, starts, contract}}, 'REST_NOT_YET_INDEXED');
-        }
-        // If checkpoints exist, fall through and let the node's local DAG search take over.
-      } else if (hint?.start && !from.includes(hint.start)) {
+      if (hint?.start && !from.includes(hint.start)) {
         from.unshift(hint.start);
+        acc = await this.acceptance(txid, [hint.start]).catch(() => null);
       }
     }
-    if (!from.length) return this.defer('genesis:' + txid, {kind: 'genesis', id: txid, hint: {eventAt, daa, starts, contract}}, 'NO_CHECKPOINT');
-    const acc = await this.acceptance(txid, from);
+    if (!from.length && !acc) return this.defer('genesis:' + txid, {kind: 'genesis', id: txid, hint: {eventAt, daa, starts, contract}}, 'NO_CHECKPOINT');
     found = acc ? await this.acceptedHigh(txid, acc) : null;
     if (!found) return this.defer('genesis:' + txid, {kind: 'genesis', id: txid, hint: {eventAt, daa, starts, contract}}, 'GENESIS_NOT_FOUND');
     this.pending.delete('genesis:' + txid);
