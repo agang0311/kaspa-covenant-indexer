@@ -1314,7 +1314,8 @@ function renderJournalFeed(logs) {
       tagClass = 'tag-active';
       kindLabel = '✓ 链上转移生效 (' + (d.kind || 'ACTION') + ')';
       bodyHtml = '<div class="journal-grid">' +
-        '<div class="journal-field"><span class="journal-field-label">轮次 ID:</span><span class="journal-field-val mono">' + renderHash(d.round, '轮次 ID') + '</span></div>' +
+        '<div class="journal-field"><span class="journal-field-label">轮次 CID:</span><span class="journal-field-val mono">' + renderHash(d.cid || '-', '轮次 CID') + '</span></div>' +
+        '<div class="journal-field"><span class="journal-field-label">创世 TXID:</span><span class="journal-field-val mono">' + renderHash(d.round, '创世 TXID') + '</span></div>' +
         '<div class="journal-field"><span class="journal-field-label">序号:</span><span class="journal-field-val mono">Seq #' + (d.seq ?? '-') + '</span></div>' +
         '<div class="journal-field"><span class="journal-field-label">交易 TXID:</span><span class="journal-field-val mono">' + renderHash(d.txid, '交易 TXID') + '</span></div>' +
         '<div class="journal-field"><span class="journal-field-label">接受块:</span><span class="journal-field-val mono">' + renderHash(d.accepting, '接受块哈希') + '</span></div>' +
@@ -1379,7 +1380,7 @@ function renderJournalFeed(logs) {
       tagClass = 'tag-standby';
       kindLabel = '⚡ REST 辅助探针命中花费 (Spender Oracle)';
       bodyHtml = '<div class="journal-grid">' +
-        '<div class="journal-field"><span class="journal-field-label">轮次 ID:</span><span class="journal-field-val mono">' + renderHash(d.round, '轮次 ID') + '</span></div>' +
+        '<div class="journal-field"><span class="journal-field-label">轮次 CID:</span><span class="journal-field-val mono">' + renderHash(d.cid || d.round, '轮次 CID') + '</span></div>' +
         '<div class="journal-field"><span class="journal-field-label">花费 TXID:</span><span class="journal-field-val mono">' + renderHash(d.txid, '花费 TXID') + '</span></div>' +
         '<div class="journal-field"><span class="journal-field-label">接受块:</span><span class="journal-field-val mono">' + renderHash(d.accepting, '接受块哈希') + '</span></div>' +
       '</div>';

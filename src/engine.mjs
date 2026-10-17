@@ -384,7 +384,7 @@ export class Engine {
         start,
         source: 'rest-hint'
       });
-      this.store.log('REST_HINT_SPENDER_FOUND', {round: cid, txid, accepting: raw.accepting_block_hash}, this.now());
+      this.store.log('REST_HINT_SPENDER_FOUND', {round: cid, cid, txid, accepting: raw.accepting_block_hash}, this.now());
     }
     return out;
   }
@@ -657,7 +657,7 @@ export class Engine {
       return 'KNOWN';
     }
     if (rec?.address && rec.status === 'LIVE') await this.unsubscribe(rec.address);
-    this.store.log('APPLIED', {round: next.id, seq, kind, txid: chosen.txid, accepting: acc.hash, utxoCheck}, now);
+    this.store.log('APPLIED', {round: next.id, roundId: next.id, cid: next.cid, seq, kind, txid: chosen.txid, accepting: acc.hash, utxoCheck}, now);
     if (next.tip && utxoCheck !== 'SUCCESSOR_LIVE_MATCHES' && this.config.autoCatchup) this.run('spend:' + next.id, () => this.resolveSpend(next.id));
     return 'APPLIED';
   }
