@@ -1505,7 +1505,7 @@ window.poolAdd = async function (url) {
     const res = await api('/pool/add', 'POST', {url});
     if (res.ok) {
       const v = res.verified || {};
-      showToast('已加入候选池：' + url + ' · ' + (v.networkId || '') + ' · p2p ' + String(v.p2pId || '-').slice(0, 8) + '\n下次探测/换血时参与主备选举', 'var(--emerald)');
+      showToast('已加入候选池：' + url + ' · ' + (v.networkId || '') + ' · p2p ' + String(v.p2pId || '-').slice(0, 8) + '\\n下次探测/换血时参与主备选举', 'var(--emerald)');
       await loadNodePoolBenchmark();
     }
   } catch (err) {
@@ -1514,7 +1514,7 @@ window.poolAdd = async function (url) {
 };
 
 window.poolRemove = async function (url) {
-  if (!confirm('确认从候选池移除该节点？\n' + url + '\n\n已建立的连接不受影响，下次探测/换血时生效。')) return;
+  if (!confirm('确认从候选池移除该节点？\\n' + url + '\\n\\n已建立的连接不受影响，下次探测/换血时生效。')) return;
   try {
     const res = await api('/pool/remove', 'POST', {url});
     if (res.ok) {
