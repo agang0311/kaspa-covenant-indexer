@@ -726,10 +726,15 @@ export class Engine {
     if (this.config.restUrl && !starts) {
       const hint = await this.genesisFromRest(txid);
       if (hint?.notFound) {
-        this.store.log('GENESIS_IGNORED', {txid, reason: 'transaction not found on chain (REST 404)'}, this.now());
-        return 'IGNORED';
+        // Public REST indexers typically lag live P2P DAG by 5-15 seconds. Never prematurely mark IGNORED
+        // on a brand-new live event based solely on a temporary REST 404.
+        if (!from.length) {
+          return this.defer('genesis:' + txid, {kind: 'genesis', id: txid, hint: {eventAt, daa, starts, contract}}, 'REST_NOT_YET_INDEXED');
+        }
+        // If checkpoints exist, fall through and let the node's local DAG search take over.
+      } else if (hint?.start && !from.includes(hint.start)) {
+        from.unshift(hint.start);
       }
-      if (hint?.start && !from.includes(hint.start)) from.unshift(hint.start);
     }
     if (!from.length) return this.defer('genesis:' + txid, {kind: 'genesis', id: txid, hint: {eventAt, daa, starts, contract}}, 'NO_CHECKPOINT');
     const acc = await this.acceptance(txid, from);
