@@ -156,6 +156,46 @@ export async function openDualNode({open, urls, log = () => {}, reconnectMs = [1
     subscribeUtxosChanged: async addrs => { addrs.forEach(a => subs.add(a)); await both('subscribeUtxosChanged', addrs); },
     unsubscribeUtxosChanged: async addrs => { addrs.forEach(a => subs.delete(a)); await both('unsubscribeUtxosChanged', addrs); },
     subscribeVirtualChainChanged: async () => { chainSub = true; await both('subscribeVirtualChainChanged'); },
+    switchUrls: async newUrls => {
+      if (!Array.isArray(newUrls) || newUrls.length !== 2 || newUrls[0] === newUrls[1]) {
+        throw Error('DUAL_NODE_NEEDS_TWO_DISTINCT_URLS');
+      }
+      for (let i = 0; i < 2; i++) {
+        const m = members[i];
+        if (m.url !== newUrls[i]) {
+          if (m.timer) { clearTimer(m.timer); m.timer = null; }
+          const old = m.node;
+          m.node = null;
+          m.up = false;
+          m.gen++;
+          m.url = newUrls[i];
+          m.attempts = 0;
+          if (old) { try { await old.close(); } catch {} }
+        }
+      }
+      const results = await Promise.all(members.map(m => m.up ? true : connect(m)));
+      members.forEach((m, i) => { if (!results[i]) schedule(m); });
+      if (members[0].up && active !== members[0]) {
+        const prev = active;
+        active = members[0];
+        log('FAILOVER', {from: prev?.url, to: active.url, reason: 'OPERATOR_SWITCH'});
+        emit('failover', {from: prev?.url, to: active.url});
+      }
+      return dual.status();
+    },
+    promote: async url => {
+      if (typeof url !== 'string' || !/^wss?:\/\//i.test(url)) throw Error('INVALID_URL');
+      if (members[0].url === url && members[0].up && active === members[0]) {
+        return dual.status();
+      }
+      if (members[1].url === url && members[1].up) {
+        return await dual.switchUrls([members[1].url, members[0].url]);
+      }
+      const standby = active?.url && active.url !== url ? active.url
+        : (members.find(m => m.url !== url)?.url ?? null);
+      if (!standby || standby === url) throw Error('CANNOT_DETERMINE_STANDBY');
+      return await dual.switchUrls([url, standby]);
+    },
     close: async () => {
       closed = true;
       if (beat) clearRepeat(beat);

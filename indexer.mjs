@@ -81,8 +81,20 @@ async function openNetwork(net, {multi}) {
     return [...new Set([...managed(), ...extra, ...seedFor(net.key), ...found])];
   };
   let node;
+  const maxLag = net.key === 'tn10' ? 600n : 300n;
+  const electPair = async () => {
+    const pool = await probePool(await candidates(), probe, {maxLag});
+    const pair = choosePair(pool.healthy);
+    if (!pair.length) throw Error('POOL_NO_HEALTHY_NODE ' + net.key);
+    const urls = pair.length === 2 ? pair.map(c => c.url)
+      : [pair[0].url, pool.healthy.find(c => c.url !== pair[0].url)?.url ?? seedFor(net.key).find(u => u !== pair[0].url)];
+    if (typeof node?.switchUrls === 'function') {
+      await node.switchUrls(urls);
+    }
+    return {healthy: pool.healthy, chosen: urls, rejected: pool.rejected};
+  };
   if (o.pool) {
-    const pool = await probePool(await candidates(), probe);
+    const pool = await probePool(await candidates(), probe, {maxLag});
     log('POOL_PROBED', {network: net.key, healthy: pool.healthy.map(c => ({url: c.url, p2pId: c.p2pId, rttMs: c.rttMs, lag: String(c.lag)})), rejected: pool.rejected});
     const pair = choosePair(pool.healthy);
     if (pair.length < 2) log('POOL_ONE_BACKEND_ONLY', {network: net.key, chosen: pair.map(c => c.url)});
@@ -91,7 +103,7 @@ async function openNetwork(net, {multi}) {
       : [pair[0].url, pool.healthy.find(c => c.url !== pair[0].url)?.url ?? seedFor(net.key).find(u => u !== pair[0].url)];
     log('POOL_CHOSEN', {network: net.key, urls});
     node = await openDualNode({urls, log, open: openMember, pickReplacement: async ({avoidP2pIds, avoidUrls}) => {
-      const again = await probePool((await candidates()).filter(u => !avoidUrls.includes(u)), probe);
+      const again = await probePool((await candidates()).filter(u => !avoidUrls.includes(u)), probe, {maxLag});
       const next = chooseReplacement(again.healthy, avoidP2pIds);
       log('POOL_REPROBED', {network: net.key, chosen: next?.url ?? null, healthy: again.healthy.length, rejected: again.rejected.length});
       return next?.url ?? null;
@@ -105,7 +117,7 @@ async function openNetwork(net, {multi}) {
       restUrl: o.restUrlExplicit ? o.restUrl : net.rest}});
   node.on('utxos', data => engine.onUtxosChanged(data));
   node.on('chain', removed => engine.onChainChanged(removed));
-  return {net, store, contracts, node, engine, dbPath};
+  return {net, store, contracts, node, engine, dbPath, electPair};
 }
 
 // ---------------------------------------------------------------- status
@@ -229,7 +241,7 @@ if (o['api-port']) {
     openMember: url => openNode({network: primary.net.networkId, url, timeoutMs: 6000, connectDeadlineMs: 8000}),
     // Multi-network: every network gets its own read-only view, keyed by the network table key.
     networks: live.map(c => ({key: c.net.key, label: c.net.label, networkId: c.net.networkId, genesis: c.net.genesis,
-      rest: c.net.rest, registry: c.net.registry, store: c.store, engine: c.engine, contracts: c.contracts, node: c.node})),
+      rest: c.net.rest, registry: c.net.registry, store: c.store, engine: c.engine, contracts: c.contracts, node: c.node, electPair: c.electPair})),
     log
   });
   await new Promise((resolve, reject) => { api.once('error', reject); api.listen(Number(o['api-port']), o['api-host'], resolve); });

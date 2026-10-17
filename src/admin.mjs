@@ -113,6 +113,8 @@ export async function handleAdmin(req, res, ctx) {
       '/plugins/remove',
       '/pool/add',
       '/pool/remove',
+      '/pool/activate',
+      '/pool/elect',
       '/compile',
       '/generate-plugin',
       '/install-plugin'
@@ -509,6 +511,8 @@ export async function handleAdmin(req, res, ctx) {
       const store = view.store;
       const managed = store?.poolNodes?.() ?? [];
       const active = typeof view.node?.status === 'function' ? view.node.status() : [];
+      const activeUrl = active.find(m => m.active)?.url ?? view.node?.url ?? view.node?.identity?.url ?? null;
+      const standbyUrl = active.find(m => !m.active && m.up)?.url ?? null;
       send(200, {
         ok: true,
         network: view.networkId,
@@ -517,8 +521,47 @@ export async function handleAdmin(req, res, ctx) {
         managed,
         // Which managed URLs are currently carrying a connection (primary or standby).
         connected: active.filter(m => m.up).map(m => m.url),
-        active: view.node?.identity?.url ?? null
+        active: activeUrl,
+        activeUrl,
+        standbyUrl,
+        nodeStatus: active
       });
+      return true;
+    }
+
+    if (sub === '/pool/activate' && req.method === 'POST') {
+      try {
+        const view = pickView(url.searchParams.get('network'));
+        if (!view) { send(400, {ok: false, error: 'UNKNOWN_NETWORK', networks: viewKeys}); return true; }
+        const body = await readBody(req);
+        const raw = typeof body?.url === 'string' ? body.url.trim() : '';
+        if (!raw || !/^wss?:\/\//i.test(raw)) {
+          send(400, {ok: false, error: 'INVALID_URL', detail: '需要 ws:// 或 wss:// 完整 URL'});
+          return true;
+        }
+        if (typeof view.node?.promote !== 'function') {
+          send(400, {ok: false, error: 'DUAL_NODE_NOT_SUPPORTED'});
+          return true;
+        }
+        const status = await view.node.promote(raw);
+        log('POOL_PRIMARY_SWITCHED', {network: view.key, to: raw});
+        send(200, {ok: true, active: view.node.url, nodeStatus: status});
+      } catch (err) { send(500, {ok: false, error: err.message}); }
+      return true;
+    }
+
+    if (sub === '/pool/elect' && req.method === 'POST') {
+      try {
+        const view = pickView(url.searchParams.get('network'));
+        if (!view) { send(400, {ok: false, error: 'UNKNOWN_NETWORK', networks: viewKeys}); return true; }
+        if (typeof view.electPair !== 'function') {
+          send(400, {ok: false, error: 'ELECT_NOT_SUPPORTED'});
+          return true;
+        }
+        const result = await view.electPair();
+        log('POOL_RE_ELECTED', {network: view.key, chosen: result.chosen});
+        send(200, {ok: true, ...result, active: view.node?.url, nodeStatus: view.node?.status?.() ?? []});
+      } catch (err) { send(500, {ok: false, error: err.message}); }
       return true;
     }
 

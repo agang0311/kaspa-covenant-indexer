@@ -747,7 +747,10 @@ input:focus, select:focus, textarea:focus {
           基于双节点热备模型（Primary + Standby，强制互斥 P2P 后端），实现零秒容灾转移与实时选定链重组追踪。
         </div>
       </div>
-      <button class="btn btn-pri btn-sm" id="btnBenchmarkPool">⚡ 一键测速候选节点池 (Benchmark Pool)</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn btn-sm" id="btnElectPool" style="white-space:nowrap;" title="并行测速候选池，自动切换到延迟最低且不同后端的两个健康节点">🔄 重新选举最优主备</button>
+        <button class="btn btn-pri btn-sm" id="btnBenchmarkPool">⚡ 一键测速候选节点池 (Benchmark Pool)</button>
+      </div>
     </div>
 
     <!-- 活跃双节点矩阵卡片 -->
@@ -789,12 +792,12 @@ input:focus, select:focus, textarea:focus {
     <div class="card" style="padding:0;overflow:hidden;margin-bottom:16px;">
       <div style="padding:12px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;">
         <span style="font-weight:700;">📌 已入池的自定义节点 (Managed Pool)</span>
-        <span style="color:var(--muted);font-size:11px;">这些地址已持久化，会参与主备选举；可直接移除</span>
+        <span style="color:var(--muted);font-size:11px;">这些地址已持久化；可点击「设为主连接」立即接管，或由系统故障换血时选举</span>
       </div>
       <div class="table-wrap" style="border-bottom:1px solid var(--border);">
         <table>
           <thead>
-            <tr><th>节点地址</th><th>加入时间</th><th>当前连接</th><th>操作</th></tr>
+            <tr><th>节点地址</th><th>加入时间</th><th>当前长连接角色 (Active Role)</th><th>操作</th></tr>
           </thead>
           <tbody id="tblManagedPool">
             <tr><td colspan="4" style="text-align:center;color:var(--muted);">暂无自定义池节点（可在下方测速后点「+ 加入池」，或在上方自定义探测里加入）</td></tr>
@@ -1474,9 +1477,9 @@ async function loadNodePoolBenchmark() {
         lagBadge = (c.lag === '0') ? '<span class="tag tag-active">已对齐 (0 块)</span>' : '<span class="tag tag-warn mono">落后 ' + c.lag + ' 块</span>';
       }
 
-      let statusHtml = '<span style="color:var(--rose);">○ 离线 (' + (c.error || 'ERROR') + ')</span>';
+      let statusHtml = '<span style="color:var(--rose);">○ 探针超时 (' + (c.error || 'ERROR') + ')</span>';
       if (c.up) {
-        statusHtml = '<span style="color:var(--emerald);">● 已连接</span> · ' + (c.isSynced ? 'Synced' : 'Catching-up') + (c.hasUtxoIndex ? ' · UTXO✓' : '');
+        statusHtml = '<span style="color:var(--emerald);">🟢 探针握手通过</span> · ' + (c.isSynced ? 'Synced' : 'Catching-up') + (c.hasUtxoIndex ? ' · UTXO✓' : '');
       }
 
       let backendHtml = '<span class="mono" style="font-size:11px;color:var(--muted);">' + (c.p2pId ? c.p2pId.slice(0, 8) + '...' : '-') + '</span>';
@@ -1498,6 +1501,7 @@ async function loadNodePoolBenchmark() {
             (c.managed
               ? '<button class="btn btn-sm" style="color:var(--rose);border-color:rgba(239,68,68,0.3);" onclick="poolRemove(\\'' + c.url + '\\')">移出池</button>'
               : '<button class="btn btn-sm btn-pri"' + (c.up ? '' : ' disabled title="节点离线，不能加入池"') + ' onclick="poolAdd(\\'' + c.url + '\\')">+ 加入池</button>') +
+            (c.up ? '<button class="btn btn-sm" onclick="poolActivate(\\'' + c.url + '\\')">设为主连接</button>' : '') +
           '</div>' +
         '</td>' +
       '</tr>';
@@ -1523,15 +1527,33 @@ async function loadManagedPool() {
       tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--muted);">暂无自定义池节点（可在下方测速后点「+ 加入池」，或在上方自定义探测里加入）</td></tr>';
       return;
     }
-    const connected = res.connected || [];
+    const norm = u => (u || '').replace('/json', '').replace('/borsh', '');
+    const activeNorm = norm(res.activeUrl || res.active);
+    const standbyNorm = norm(res.standbyUrl);
     tbody.innerHTML = list.map(n => {
       const when = n.addedAt ? new Date(n.addedAt).toLocaleString() : '-';
-      const isUp = connected.includes(n.url);
+      const uNorm = norm(n.url);
+      const isPrimary = Boolean(activeNorm && activeNorm === uNorm);
+      const isStandby = Boolean(standbyNorm && standbyNorm === uNorm);
+      let roleHtml = '<span class="tag tag-retired">⏸️ 候选待命 (Standby Candidate)</span>';
+      if (isPrimary) {
+        roleHtml = '<span class="tag tag-active" style="background:var(--emerald);color:#000;font-weight:700;">👑 主连接 (PRIMARY)</span>';
+      } else if (isStandby) {
+        roleHtml = '<span class="tag tag-active">🛡️ 热备连接 (STANDBY)</span>';
+      }
+
+      const actBtn = isPrimary
+        ? '<span style="color:var(--emerald);font-size:11px;font-weight:700;margin-right:8px;">✓ 正在采信</span>'
+        : ('<button class="btn btn-sm btn-pri" style="margin-right:6px;" onclick="poolActivate(' + JSON.stringify(n.url) + ')">⚡ 设为主连接</button>');
+
       return '<tr>' +
         '<td class="mono" style="word-break:break-all;"><b>' + n.url + '</b></td>' +
         '<td class="mono" style="font-size:11px;color:var(--muted);">' + when + '</td>' +
-        '<td>' + (isUp ? '<span class="tag tag-active">● 已连接</span>' : '<span class="tag tag-retired">未连接</span>') + '</td>' +
-        '<td><button class="btn btn-sm" style="color:var(--rose);border-color:rgba(239,68,68,0.3);" onclick="poolRemove(' + JSON.stringify(n.url) + ')">移出池</button></td>' +
+        '<td>' + roleHtml + '</td>' +
+        '<td>' +
+          actBtn +
+          '<button class="btn btn-sm" style="color:var(--rose);border-color:rgba(239,68,68,0.3);" onclick="poolRemove(' + JSON.stringify(n.url) + ')">移出池</button>' +
+        '</td>' +
       '</tr>';
     }).join('');
   } catch (err) {
@@ -1540,6 +1562,42 @@ async function loadManagedPool() {
 }
 
 document.getElementById('btnBenchmarkPool').onclick = loadNodePoolBenchmark;
+
+const btnElect = document.getElementById('btnElectPool');
+if (btnElect) {
+  btnElect.onclick = async () => {
+    btnElect.disabled = true;
+    btnElect.innerText = '🔄 正在全网测速并重选主备...';
+    try {
+      const res = await api('/pool/elect', 'POST', {});
+      if (res.ok) {
+        showToast('主备节点已重新选举：' + (res.chosen || []).join(' + '), 'var(--emerald)');
+        await refreshAll();
+        await loadManagedPool();
+        await loadNodePoolBenchmark();
+      }
+    } catch (err) {
+      showToast('重新选举失败: ' + err.message, 'var(--rose)');
+    } finally {
+      btnElect.disabled = false;
+      btnElect.innerText = '🔄 重新选举最优主备';
+    }
+  };
+}
+
+window.poolActivate = async function (url) {
+  if (!confirm('确认将以下节点切换为当前网络的【主连接节点】？ ' + url)) return;
+  try {
+    const res = await api('/pool/activate', 'POST', {url});
+    if (res.ok) {
+      showToast('已成功切换主连接节点为：' + url, 'var(--emerald)');
+      await refreshAll();
+      await loadManagedPool();
+    }
+  } catch (err) {
+    showToast('切换主连接失败: ' + err.message, 'var(--rose)');
+  }
+};
 
 // Operator-managed pool nodes: persist a probed endpoint into this network's candidate pool, or drop it.
 window.poolAdd = async function (url) {
