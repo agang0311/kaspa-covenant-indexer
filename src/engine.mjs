@@ -363,14 +363,15 @@ export class Engine {
           sigOpCount: i.sig_op_count ?? 1
         })),
         outputs: (raw.outputs || []).map(o => {
-          // The REST API returns script_public_key either as a hex string or as an object whose
-          // version may be null. Normalize to the consensus shape: BigInt(version) must never see null.
           const spk = typeof o.script_public_key === 'object' && o.script_public_key !== null
             ? {version: Number(o.script_public_key.version ?? 0), script: String(o.script_public_key.script ?? '')}
             : {version: Number(o.script_public_key_version ?? 0), script: String(o.script_public_key ?? '')};
+          const covId = o.covenant_id || o.covenant?.covenantId || null;
+          const covInput = o.covenant_authorizing_input ?? o.covenant?.authorizingInput ?? 0;
           return {
             value: String(o.amount ?? 0),
             scriptPublicKey: spk,
+            covenant: covId ? { authorizingInput: Number(covInput), covenantId: String(covId) } : null,
             verboseData: {
               scriptPublicKeyAddress: o.script_public_key_address || null
             }
@@ -805,7 +806,11 @@ export class Engine {
     const strip = rows => rows.map(({verboseData, ...rest}) => rest);
     const same = k => JSON.stringify(k === 'inputs' ? strip(high.tx[k]) : high.tx[k]) === JSON.stringify(k === 'inputs' ? strip(candidate.tx[k]) : candidate.tx[k]);
     let tx = candidate.tx, source = candidate.source;
-    if (!['inputs', 'outputs', 'payload'].every(same)) { tx = await this.hydrate(high.tx); source += '+accepted-witness'; }
+    // REST hints lack real lock_time and consensus-level covenant objects: ALWAYS hydrate them from the containing block
+    // body so closeEligibleDaa lockTime checks and successor covenantId checks receive genuine consensus material.
+    if (source === 'rest-hint' || !['inputs', 'outputs', 'payload'].every(same)) {
+      try { tx = await this.hydrate(high.tx); source += '+accepted-witness'; } catch {}
+    }
     tx = {...tx, verboseData: {...tx.verboseData, blockHash: high.containing}};
     tx.inputs = tx.inputs.map((i, n) => high.tx.inputs[n]?.verboseData ? {...i, verboseData: high.tx.inputs[n].verboseData} : i);
     return {...candidate, tx, containing: high.containing, source};
