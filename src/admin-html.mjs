@@ -424,6 +424,12 @@ tr:hover td { background: rgba(23, 36, 60, 0.5); }
 }
 .btn-pri:hover { background: #5ebaa9; color: #04100c; }
 .btn-sm { padding: 4px 9px; font-size: 11.5px; }
+/* Action buttons inside tables must never be squeezed into a vertical stack. */
+table td .btn, table td button {
+  white-space: nowrap;
+  flex: 0 0 auto;
+  line-height: 1.35;
+}
 
 /* Inputs */
 input, select, textarea {
@@ -797,7 +803,7 @@ input:focus, select:focus, textarea:focus {
       <div class="table-wrap" style="border-bottom:1px solid var(--border);">
         <table>
           <thead>
-            <tr><th>节点地址</th><th>加入时间</th><th>当前长连接角色 (Active Role)</th><th>操作</th></tr>
+            <tr><th style="min-width:180px;">节点地址</th><th style="white-space:nowrap;">加入时间</th><th style="white-space:nowrap;">当前长连接角色</th><th style="white-space:nowrap;min-width:196px;">操作</th></tr>
           </thead>
           <tbody id="tblManagedPool">
             <tr><td colspan="4" style="text-align:center;color:var(--muted);">暂无自定义池节点（可在下方测速后点「+ 加入池」，或在上方自定义探测里加入）</td></tr>
@@ -813,11 +819,11 @@ input:focus, select:focus, textarea:focus {
           <thead>
             <tr>
               <th>候选节点地址</th>
-              <th>往返延迟 RTT</th>
-              <th>落后块数 (Lag)</th>
-              <th>同步与 UTXO 状态</th>
-              <th>P2P 后端标识</th>
-              <th>操作</th>
+              <th style="white-space:nowrap;">延迟 RTT</th>
+              <th style="white-space:nowrap;">落后 Lag</th>
+              <th style="white-space:nowrap;">同步 / UTXO</th>
+              <th style="white-space:nowrap;">P2P 后端</th>
+              <th style="white-space:nowrap;min-width:168px;">操作</th>
             </tr>
           </thead>
           <tbody id="tblCandidatePool">
@@ -1536,22 +1542,22 @@ async function loadNodePoolBenchmark() {
       }
 
       return '<tr>' +
-        '<td class="mono"><b>' + c.url + '</b>' +
+        '<td class="mono" style="word-break:break-all;overflow-wrap:anywhere;min-width:180px;"><b>' + c.url + '</b>' +
           (c.managed ? ' <span class="tag tag-active" title="已持久化到候选池，会参与主备选举">✓ 池中</span>' : '') +
         '</td>' +
-        '<td>' + rttBadge + '</td>' +
-        '<td>' + lagBadge + '</td>' +
-        '<td>' + statusHtml + '</td>' +
-        '<td>' + backendHtml + '</td>' +
-        '<td>' +
-          '<div style="display:flex;gap:6px;flex-wrap:wrap;">' +
-            '<button class="btn btn-sm" onclick="probeSingle(\\'' + c.url + '\\')">诊断</button>' +
+        '<td style="white-space:nowrap;">' + rttBadge + '</td>' +
+        '<td style="white-space:nowrap;">' + lagBadge + '</td>' +
+        '<td style="white-space:nowrap;">' + statusHtml + '</td>' +
+        '<td style="white-space:nowrap;">' + backendHtml + '</td>' +
+        '<td style="white-space:nowrap;">' +
+          '<div style="display:flex;gap:4px;flex-wrap:nowrap;align-items:center;">' +
+            '<button class="btn btn-sm" style="padding:2px 7px;font-size:11px;white-space:nowrap;" title="在自定义探测中诊断该节点" onclick="probeSingle(\\'' + c.url + '\\')">诊断</button>' +
             (c.managed
-              ? '<button class="btn btn-sm" style="color:var(--rose);border-color:rgba(239,68,68,0.3);" onclick="poolRemove(\\'' + c.url + '\\')">移出池</button>'
-              : '<button class="btn btn-sm btn-pri"' + (c.up ? '' : ' disabled title="节点离线，不能加入池"') + ' onclick="poolAdd(\\'' + c.url + '\\')">+ 加入池</button>') +
-            (c.up ? '<button class="btn btn-sm" onclick="poolActivate(\\'' + c.url + '\\')">设为主连接</button>' : '') +
+              ? '<button class="btn btn-sm" style="padding:2px 7px;font-size:11px;white-space:nowrap;color:var(--rose);border-color:rgba(239,68,68,0.3);" title="从候选池移除" onclick="poolRemove(\\'' + c.url + '\\')">移出</button>'
+              : '<button class="btn btn-sm btn-pri" style="padding:2px 7px;font-size:11px;white-space:nowrap;"' + (c.up ? '' : ' disabled title="节点离线，不能加入池"') + ' onclick="poolAdd(\\'' + c.url + '\\')">＋加入</button>') +
+            (c.up ? '<button class="btn btn-sm" style="padding:2px 7px;font-size:11px;white-space:nowrap;" title="切换为当前主连接" onclick="poolActivate(\\'' + c.url + '\\')">⚡主连</button>' : '') +
           '</div>' +
-        '</td>' +
+        '</td>' + +
       '</tr>';
     }).join('');
 
@@ -1591,16 +1597,18 @@ async function loadManagedPool() {
       }
 
       const actBtn = isPrimary
-        ? '<span style="color:var(--emerald);font-size:11px;font-weight:700;margin-right:8px;">✓ 正在采信</span>'
-        : ('<button class="btn btn-sm btn-pri" style="margin-right:6px;" onclick="poolActivate(' + JSON.stringify(n.url) + ')">⚡ 设为主连接</button>');
+        ? '<span style="color:var(--emerald);font-size:11px;font-weight:700;white-space:nowrap;">✓ 正在采信</span>'
+        : ('<button class="btn btn-sm btn-pri" style="padding:2px 7px;font-size:11px;white-space:nowrap;" title="切换为当前主连接" onclick="poolActivate(' + JSON.stringify(n.url) + ')">⚡ 主连</button>');
 
       return '<tr>' +
-        '<td class="mono" style="word-break:break-all;"><b>' + n.url + '</b></td>' +
-        '<td class="mono" style="font-size:11px;color:var(--muted);">' + when + '</td>' +
-        '<td>' + roleHtml + '</td>' +
-        '<td>' +
-          actBtn +
-          '<button class="btn btn-sm" style="color:var(--rose);border-color:rgba(239,68,68,0.3);" onclick="poolRemove(' + JSON.stringify(n.url) + ')">移出池</button>' +
+        '<td class="mono" style="word-break:break-all;overflow-wrap:anywhere;"><b>' + n.url + '</b></td>' +
+        '<td class="mono" style="font-size:11px;color:var(--muted);white-space:nowrap;">' + when + '</td>' +
+        '<td style="white-space:nowrap;">' + roleHtml + '</td>' +
+        '<td style="white-space:nowrap;">' +
+          '<div style="display:flex;gap:4px;flex-wrap:nowrap;align-items:center;">' +
+            actBtn +
+            '<button class="btn btn-sm" style="padding:2px 7px;font-size:11px;white-space:nowrap;color:var(--rose);border-color:rgba(239,68,68,0.3);" title="从候选池移除" onclick="poolRemove(' + JSON.stringify(n.url) + ')">移出</button>' +
+          '</div>' +
         '</td>' +
       '</tr>';
     }).join('');
@@ -1795,18 +1803,18 @@ async function loadPluginsTab() {
       const keyName = p.key || (cfg.options?.id ? (cfg.options.id + '@' + (cfg.options.version || '1.0.0')) : cfg.module);
 
       return '<tr>' +
-        '<td class="mono"><b>' + keyName + '</b></td>' +
-        '<td class="mono">' + (cfg.module || '-') + '</td>' +
-        '<td class="mono" style="font-size:12px;color:var(--muted);">' + (p.profileId ? renderHash(p.profileId, 'Profile ID') : '-') + '</td>' +
-        '<td>' + watchText + '</td>' +
-        '<td>' + (cfg.retired ? '<span class="tag tag-retired">RETIRED (兼容)</span>' : '<span class="tag tag-active">ACTIVE (主导)</span>') + '</td>' +
+        '<td class="mono" style="word-break:break-all;"><b>' + keyName + '</b></td>' +
+        '<td class="mono" style="white-space:nowrap;">' + (cfg.module || '-') + '</td>' +
+        '<td class="mono" style="font-size:12px;color:var(--muted);word-break:break-all;overflow-wrap:anywhere;">' + (p.profileId ? renderHash(p.profileId, 'Profile ID') : '-') + '</td>' +
+        '<td style="white-space:nowrap;">' + watchText + '</td>' +
+        '<td style="white-space:nowrap;">' + (cfg.retired ? '<span class="tag tag-retired">RETIRED (兼容)</span>' : '<span class="tag tag-active">ACTIVE (主导)</span>') + '</td>' +
         '<td>' +
-          '<div style="display:flex;gap:6px;flex-wrap:wrap;">' +
-            '<button class="btn btn-sm btn-pri" onclick="openPluginConfigModal(' + idx + ')">⚙️ 配置规则</button>' +
-            '<button class="btn btn-sm" onclick="togglePlugin(' + idx + ', ' + (!cfg.retired) + ')">' +
+          '<div style="display:flex;gap:4px;flex-wrap:nowrap;align-items:center;">' +
+            '<button class="btn btn-sm btn-pri" style="padding:2px 7px;font-size:11px;white-space:nowrap;" onclick="openPluginConfigModal(' + idx + ')">⚙️ 配置</button>' +
+            '<button class="btn btn-sm" style="padding:2px 7px;font-size:11px;white-space:nowrap;" onclick="togglePlugin(' + idx + ', ' + (!cfg.retired) + ')">' +
               (cfg.retired ? '🟢 激活' : '⏸️ 退役') +
             '</button>' +
-            '<button class="btn btn-sm" style="color:var(--rose);border-color:rgba(239,68,68,0.3);" onclick="removePlugin(' + idx + ', \\'' + (p.key || cfg.module) + '\\')">🗑️ 卸载</button>' +
+            '<button class="btn btn-sm" style="padding:2px 7px;font-size:11px;white-space:nowrap;color:var(--rose);border-color:rgba(239,68,68,0.3);" onclick="removePlugin(' + idx + ', \\'' + (p.key || cfg.module) + '\\')">🗑️ 卸载</button>' +
           '</div>' +
         '</td>' +
       '</tr>';
