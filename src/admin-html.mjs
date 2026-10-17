@@ -1470,13 +1470,20 @@ async function loadNodePoolBenchmark() {
       }
 
       return '<tr>' +
-        '<td class="mono"><b>' + c.url + '</b></td>' +
+        '<td class="mono"><b>' + c.url + '</b>' +
+          (c.managed ? ' <span class="tag tag-active" title="已持久化到候选池，会参与主备选举">✓ 池中</span>' : '') +
+        '</td>' +
         '<td>' + rttBadge + '</td>' +
         '<td>' + lagBadge + '</td>' +
         '<td>' + statusHtml + '</td>' +
         '<td>' + backendHtml + '</td>' +
         '<td>' +
-          '<button class="btn btn-sm" onclick="probeSingle(\\'' + c.url + '\\')">诊断</button>' +
+          '<div style="display:flex;gap:6px;flex-wrap:wrap;">' +
+            '<button class="btn btn-sm" onclick="probeSingle(\\'' + c.url + '\\')">诊断</button>' +
+            (c.managed
+              ? '<button class="btn btn-sm" style="color:var(--rose);border-color:rgba(239,68,68,0.3);" onclick="poolRemove(\\'' + c.url + '\\')">移出池</button>'
+              : '<button class="btn btn-sm btn-pri"' + (c.up ? '' : ' disabled title="节点离线，不能加入池"') + ' onclick="poolAdd(\\'' + c.url + '\\')">+ 加入池</button>') +
+          '</div>' +
         '</td>' +
       '</tr>';
     }).join('');
@@ -1491,6 +1498,33 @@ async function loadNodePoolBenchmark() {
 }
 
 document.getElementById('btnBenchmarkPool').onclick = loadNodePoolBenchmark;
+
+// Operator-managed pool nodes: persist a probed endpoint into this network's candidate pool, or drop it.
+window.poolAdd = async function (url) {
+  try {
+    const res = await api('/pool/add', 'POST', {url});
+    if (res.ok) {
+      const v = res.verified || {};
+      showToast('已加入候选池：' + url + ' · ' + (v.networkId || '') + ' · p2p ' + String(v.p2pId || '-').slice(0, 8) + '\n下次探测/换血时参与主备选举', 'var(--emerald)');
+      await loadNodePoolBenchmark();
+    }
+  } catch (err) {
+    showToast('加入候选池失败: ' + err.message, 'var(--rose)');
+  }
+};
+
+window.poolRemove = async function (url) {
+  if (!confirm('确认从候选池移除该节点？\n' + url + '\n\n已建立的连接不受影响，下次探测/换血时生效。')) return;
+  try {
+    const res = await api('/pool/remove', 'POST', {url});
+    if (res.ok) {
+      showToast('已从候选池移除：' + url, 'var(--emerald)');
+      await loadNodePoolBenchmark();
+    }
+  } catch (err) {
+    showToast('移除失败: ' + err.message, 'var(--rose)');
+  }
+};
 
 // REST Hint Probe
 document.getElementById('btnProbeRest').onclick = async () => {

@@ -151,6 +151,25 @@ export class Store {
   pending(limit = 100) { return this.db.prepare('SELECT id,payload FROM outbox WHERE delivered_at IS NULL ORDER BY id LIMIT ?').all(limit).map(r => ({id: r.id, payload: dec(r.payload)})); }
   delivered(id, at) { this.db.prepare('UPDATE outbox SET delivered_at=? WHERE id=?').run(at, id); }
 
+  /**
+   * Operator-managed extra pool nodes (persisted in meta, per network). These are PROBED like any other candidate and
+   * never trusted: an entry only becomes a pool member if it passes the same networkId/sync/UTXO-index check.
+   * Stored as {url, addedAt, note}; deduplicated by url.
+   */
+  poolNodes() { return this.getMeta('poolNodes') ?? []; }
+  addPoolNode(url, note = null, now = Date.now()) {
+    const list = this.poolNodes().filter(n => n.url !== url);
+    if (list.length >= 32) throw Error('POOL_NODE_LIMIT');
+    list.push({url, note, addedAt: now});
+    this.setMeta('poolNodes', list);
+    return list;
+  }
+  removePoolNode(url) {
+    const list = this.poolNodes().filter(n => n.url !== url);
+    this.setMeta('poolNodes', list);
+    return list;
+  }
+
   log(kind, data, at) {
     this.db.prepare('INSERT INTO journal(at,kind,data) VALUES(?,?,?)').run(at, kind, enc(data));
     this.db.prepare('DELETE FROM journal WHERE id <= (SELECT MAX(id) FROM journal) - 5000').run();

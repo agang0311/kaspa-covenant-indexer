@@ -111,6 +111,8 @@ export async function handleAdmin(req, res, ctx) {
       '/plugins/toggle',
       '/plugins/update-config',
       '/plugins/remove',
+      '/pool/add',
+      '/pool/remove',
       '/compile',
       '/generate-plugin',
       '/install-plugin'
@@ -306,8 +308,11 @@ export async function handleAdmin(req, res, ctx) {
         const node = view.node;
         const body = await readBody(req).catch(() => ({}));
         const customCandidates = Array.isArray(body?.urls) ? body.urls : [];
+        // Persisted operator-managed nodes are part of the pool, so probing shows their real standing.
+        const managed = (view.store?.poolNodes?.() ?? []).map(n => n.url);
         const targets = [...new Set([
           ...customCandidates,
+          ...managed,
           ...seedFor(netKey),
           ...(typeof node?.status === 'function' ? node.status().map(m => m.url) : [node?.url]).filter(Boolean)
         ])].filter(u => typeof u === 'string' && /^wss?:\/\//i.test(u));
@@ -396,7 +401,10 @@ export async function handleAdmin(req, res, ctx) {
 
         send(200, {
           ok: true,
-          candidates: results,
+          network: view.networkId,
+          networkKey: view.key ?? null,
+          candidates: results.map(r => ({...r, managed: managed.includes(r.url)})),
+          managed,
           maxDaa: maxDaa.toString()
         });
       } catch (err) {
@@ -491,6 +499,75 @@ export async function handleAdmin(req, res, ctx) {
         // Config enriched with effective per-network runtime defaults.
         config: enrichedConfig
       });
+      return true;
+    }
+
+    // 3b. Operator-managed pool nodes (read-only list; add/remove are password-protected mutations).
+    if (sub === '/pool' && req.method === 'GET') {
+      const view = pickView(url.searchParams.get('network'));
+      if (!view) { send(400, {ok: false, error: 'UNKNOWN_NETWORK', networks: viewKeys}); return true; }
+      const store = view.store;
+      const managed = store?.poolNodes?.() ?? [];
+      const active = typeof view.node?.status === 'function' ? view.node.status() : [];
+      send(200, {
+        ok: true,
+        network: view.networkId,
+        networkKey: view.key ?? null,
+        seeds: seedFor(view.key ?? 'tn10'),
+        managed,
+        // Which managed URLs are currently carrying a connection (primary or standby).
+        connected: active.filter(m => m.up).map(m => m.url),
+        active: view.node?.identity?.url ?? null
+      });
+      return true;
+    }
+
+    if (sub === '/pool/add' && req.method === 'POST') {
+      try {
+        const view = pickView(url.searchParams.get('network'));
+        if (!view) { send(400, {ok: false, error: 'UNKNOWN_NETWORK', networks: viewKeys}); return true; }
+        const body = await readBody(req);
+        const raw = typeof body?.url === 'string' ? body.url.trim() : '';
+        if (!/^wss?:\/\/[^\s/]+\/\S*$/i.test(raw)) { send(400, {ok: false, error: 'INVALID_URL', detail: '需要 ws:// 或 wss:// 完整 URL'}); return true; }
+        const net = view.key ? {key: view.key, networkId: view.networkId, genesis: view.genesis} : null;
+        // Verify the endpoint BEFORE persisting: it must answer on the SAME network as this view.
+        const rpc = new JsonRpcClient({url: raw, networkId: view.networkId, timeoutDuration: 6000});
+        let info, p2pId = null;
+        try {
+          await rpc.connect({timeoutDuration: 6000});
+          info = await rpc.getServerInfo();
+          try { p2pId = (await rpc.getInfo()).p2pId; } catch {}
+        } catch (e) {
+          try { await rpc.disconnect(); } catch {}
+          send(400, {ok: false, error: 'PROBE_FAILED', detail: String(e?.message ?? e).slice(0, 160)});
+          return true;
+        }
+        try { await rpc.disconnect(); } catch {}
+        if (info.networkId !== view.networkId) {
+          send(400, {ok: false, error: 'WRONG_NETWORK', detail: `节点报告 ${info.networkId}，当前视图是 ${view.networkId}`});
+          return true;
+        }
+        if (info.isSynced !== true) { send(400, {ok: false, error: 'NODE_NOT_SYNCED'}); return true; }
+        if (info.hasUtxoIndex !== true) { send(400, {ok: false, error: 'NODE_WITHOUT_UTXOINDEX'}); return true; }
+        const list = view.store.addPoolNode(raw, typeof body?.note === 'string' ? body.note.slice(0, 120) : null, Date.now());
+        log('POOL_NODE_ADDED', {network: view.key, url: raw, p2pId, serverVersion: info.serverVersion});
+        send(200, {ok: true, managed: list, verified: {networkId: info.networkId, p2pId, serverVersion: info.serverVersion,
+          isSynced: true, hasUtxoIndex: true, virtualDaaScore: info.virtualDaaScore?.toString?.() ?? null}, net});
+      } catch (err) { send(500, {ok: false, error: err.message}); }
+      return true;
+    }
+
+    if (sub === '/pool/remove' && req.method === 'POST') {
+      try {
+        const view = pickView(url.searchParams.get('network'));
+        if (!view) { send(400, {ok: false, error: 'UNKNOWN_NETWORK', networks: viewKeys}); return true; }
+        const body = await readBody(req);
+        const raw = typeof body?.url === 'string' ? body.url.trim() : '';
+        if (!raw) { send(400, {ok: false, error: 'URL_REQUIRED'}); return true; }
+        const list = view.store.removePoolNode(raw);
+        log('POOL_NODE_REMOVED', {network: view.key, url: raw});
+        send(200, {ok: true, managed: list, note: '已从候选池移除；当前已建立的连接不受影响，下次探测/换血时生效'});
+      } catch (err) { send(500, {ok: false, error: err.message}); }
       return true;
     }
 

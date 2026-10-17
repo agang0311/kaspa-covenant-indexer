@@ -73,9 +73,12 @@ async function openNetwork(net, {multi}) {
     } finally { try { await n.close(); } catch {} }
   };
   const extra = o['pool-urls'] ? o['pool-urls'].split(',').map(s => s.trim()).filter(u => u.includes('/' + net.resolverPath + '/')) : [];
+  // Operator-managed pool nodes (added from the Admin UI, persisted in this network's DB). Probed like any other
+  // candidate: being listed is not trust, it only means "consider this URL".
+  const managed = () => store.poolNodes().map(n => n.url).filter(u => typeof u === 'string' && /^wss?:\/\//i.test(u));
   const candidates = async () => {
     const found = await discoverFromResolvers(RESOLVER_HOSTS, {network: net.key, rounds: 2});
-    return [...new Set([...extra, ...seedFor(net.key), ...found])];
+    return [...new Set([...managed(), ...extra, ...seedFor(net.key), ...found])];
   };
   let node;
   if (o.pool) {
