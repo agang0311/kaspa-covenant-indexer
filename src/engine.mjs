@@ -547,9 +547,11 @@ export class Engine {
       this.store.setMeta(`window-tip:${roundId}`, tipKey);
     }
     let candidates = await this.fromMempool(rec.address, tip, rec.data.cid);
+    if (!candidates.length && this.config.restUrl) {
+      candidates = await this.fromRest(rec.address, tip, rec.data.cid);
+    }
     if (!candidates.length) {
       // Bounded accepted-chain walk (replaces the getBlocks body scan): newest start first, older starts only if needed.
-      // Runs BEFORE the REST hint: the node is local (ms) and is the source of truth; REST is only a last resort.
       let failed = 0;
       for (const hint of starts) {
         let w;
@@ -571,8 +573,6 @@ export class Engine {
         const chosen = await this.bindAccepted({txid: txidOf(tx), tx, containing: w.containing, source}, w.acc);
         return this.applySpend(rec, chosen, w.acc);
       }
-      // Node walk exhausted: NOW try the REST hint oracle as an accelerator, then re-verify locally.
-      if (this.config.restUrl) candidates = await this.fromRest(rec.address, tip, rec.data.cid);
     }
     if (!candidates.length) {
       const live = await this.liveUtxo(rec.address, tip);
@@ -963,9 +963,18 @@ function normalizeConsensusFields(tx) {
   if (out.subnetworkId == null) out.subnetworkId = '0000000000000000000000000000000000000000';
   if (Array.isArray(out.outputs)) {
     out.outputs = out.outputs.map(o => {
-      const spk = o?.scriptPublicKey ?? {};
+      let spk = {version: 0, script: ''};
+      try { if (o?.scriptPublicKey) spk = wireSpk(o.scriptPublicKey); } catch {}
+      const cov = o?.covenant ? {
+        authorizingInput: Number(o.covenant.authorizingInput ?? 0),
+        covenantId: String(o.covenant.covenantId ?? '')
+      } : (o?.covenant_id ? {
+        authorizingInput: Number(o.covenant_authorizing_input ?? 0),
+        covenantId: String(o.covenant_id)
+      } : null);
       return {...o, value: o?.value == null ? '0' : String(o.value),
-        scriptPublicKey: {version: Number(spk.version ?? 0), script: String(spk.script ?? '')}};
+        covenant: cov,
+        scriptPublicKey: spk};
     });
   }
   if (Array.isArray(out.inputs)) {
