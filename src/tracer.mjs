@@ -139,22 +139,46 @@ export async function traceAndTrackTxid(txid, {store, engine, restUrl, now = () 
     const byCid = store.byCid(extractedCid);
     if (byCid && byCid.length > 0) {
       const matched = byCid[0];
-      const trs = store.transitions(matched.id);
-      // If the round is live, notify engine to advance
-      if (matched.status === 'LIVE' && engine && typeof engine.resolveSpend === 'function') {
-        engine.run('spend:' + matched.id, () => engine.resolveSpend(matched.id));
+      let trs = store.transitions(matched.id);
+      const isKnown = trs.some(t => t.txid === cleanTxid) || matched.id === cleanTxid;
+
+      // If the round is in STALE or if the queried txid is an unapplied transition:
+      // Restore it to LIVE and actively trigger resolveSpend to advance the state machine!
+      if (!isKnown || matched.status === 'STALE') {
+        if (matched.status === 'STALE') {
+          store.db.prepare("UPDATE rounds SET status='LIVE', updated_at=? WHERE id=?").run(now(), matched.id);
+        }
+        if (engine && typeof engine.resolveSpend === 'function') {
+          engine.run('spend:' + matched.id, () => engine.resolveSpend(matched.id));
+          if (typeof engine.idle === 'function') {
+            await engine.idle();
+          }
+        }
       }
+
+      // Re-read updated state after advancing!
+      const updated = store.round(matched.id) ?? matched;
+      trs = store.transitions(matched.id);
+
+      const advanced = !isKnown && trs.some(t => t.txid === cleanTxid);
+      const statusMsg = advanced
+        ? `成功识别到未入库的链上转移并推进状态机！当前阶段: Phase ${updated.data?.state?.phase ?? updated.data?.terminal ?? '未知'}（已记录转移 ${trs.length} 笔）`
+        : matched.status === 'STALE'
+          ? `已解除该轮次的 STALE 冻结状态，并触发后台重新沿链追块！`
+          : `经回溯定位到契约 CID: ${extractedCid.slice(0, 16)}...，该轮次已存在于索引数据库中（去重成功）`;
+
       return {
-        status: 'ALREADY_INDEXED',
-        action: 'DEDUPLICATED_BY_CID',
-        message: `经回溯定位到契约 CID: ${extractedCid.slice(0, 16)}...，该轮次已存在于索引数据库中（去重成功）`,
+        status: advanced ? 'ADVANCED' : 'ALREADY_INDEXED',
+        action: advanced ? 'STATE_MACHINE_ADVANCED' : 'DEDUPLICATED_BY_CID',
+        message: statusMsg,
         queriedTxid: cleanTxid,
         genesisTxid,
         roundId: matched.id,
         cid: extractedCid,
-        contract: matched.contract,
-        phase: matched.data?.state?.phase,
-        terminal: matched.data?.terminal,
+        contract: updated.contract,
+        phase: updated.data?.state?.phase,
+        terminal: updated.data?.terminal,
+        indexStatus: updated.status,
         transitionsCount: trs.length,
         traceHops: chainHops.length
       };
