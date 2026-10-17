@@ -206,7 +206,9 @@ for (const ctx of live) {
   log('STARTED', {network: net.key, node: node.identity, live: store.rounds({liveOnly: true}).length, contracts: ctx.contracts.describe()});
   const every = (ms, fn) => { const t = setInterval(() => { if (!stopping && !degraded) fn(); }, ms); t.unref?.(); return t; };
   timers.push(
-    every(Number(o['checkpoint-ms']), () => engine.run('checkpoint', () => engine.checkpoint())),
+    // Checkpoints must NEVER wait behind a long serial-queue job (REST hint, window scan): a 75 s gap makes
+    // fastStart() reject every start (fastMaxAgeMs) and forces slow REST/window paths for every spend.
+    every(Number(o['checkpoint-ms']), () => { if (!stopping && !degraded) engine.checkpoint().catch(e => log('CHECKPOINT_FAILED', {network: net.key, message: String(e?.message ?? e)})); }),
     every(Number(o['reconcile-ms']), () => { engine.run('reconcile', () => engine.reconcile()); engine.run('finality', () => engine.checkFinality()); }),
     every(5000, () => engine.retryPending()),
     every(2000, () => flushOutbox(store, relay).catch(e => log('RELAY_RETRY', {network: net.key, message: String(e.message)}))),

@@ -18,7 +18,7 @@ export const DEFAULTS = Object.freeze({
   // accepted full transaction in one RPC. Any miss/error falls back to the slow path below. Measured 2026-09-30
   // (TN10, vector-10/muon-10): ~0.8-2.4 s for 40-150 chain blocks; RTT ~0.3 s per call.
   fastLookbackMs: 4000,
-  fastMaxAgeMs: 30000,            // older start -> page too large for the 192 MB heap (VPS); use slow path
+  fastMaxAgeMs: 120000,           // older start -> page too large for the 192 MB heap (VPS); use slow path
   fastMaxPages: 2,
   // Bounded fallback (2026-10-10): accepted-transaction pages of at most this many blue score, one page in memory at a
   // time (measured TN10 under load: ~100 blue = 60 chain blocks, ~1.7 MB JSON, ~30 ms). Replaces the getBlocks body scan
@@ -541,11 +541,9 @@ export class Engine {
       this.store.setMeta(`window-tip:${roundId}`, tipKey);
     }
     let candidates = await this.fromMempool(rec.address, tip, rec.data.cid);
-    if (!candidates.length && this.config.restUrl) {
-      candidates = await this.fromRest(rec.address, tip, rec.data.cid);
-    }
     if (!candidates.length) {
       // Bounded accepted-chain walk (replaces the getBlocks body scan): newest start first, older starts only if needed.
+      // Runs BEFORE the REST hint: the node is local (ms) and is the source of truth; REST is only a last resort.
       let failed = 0;
       for (const hint of starts) {
         let w;
@@ -567,7 +565,8 @@ export class Engine {
         const chosen = await this.bindAccepted({txid: txidOf(tx), tx, containing: w.containing, source}, w.acc);
         return this.applySpend(rec, chosen, w.acc);
       }
-      if (failed === starts.length) return this.defer('spend:' + roundId, {kind: 'spend', id: roundId}, 'WINDOW_SCAN_FAILED');
+      // Node walk exhausted: NOW try the REST hint oracle as an accelerator, then re-verify locally.
+      if (this.config.restUrl) candidates = await this.fromRest(rec.address, tip, rec.data.cid);
     }
     if (!candidates.length) {
       const live = await this.liveUtxo(rec.address, tip);
