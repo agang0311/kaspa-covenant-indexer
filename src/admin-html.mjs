@@ -1370,15 +1370,19 @@ function renderJournalFeed(logs) {
       '</div>';
     } else if (l.kind === 'REST_HINT_GENESIS_FOUND') {
       tagClass = 'tag-active';
-      kindLabel = '⚡ REST 定位命中创世 (Spender Oracle)';
+      kindLabel = '⚡ REST 辅助探针命中创世 (Genesis Oracle)';
       bodyHtml = '<div class="journal-grid">' +
         '<div class="journal-field"><span class="journal-field-label">创世 TXID:</span><span class="journal-field-val mono">' + renderHash(d.txid, '创世 TXID') + '</span></div>' +
         '<div class="journal-field"><span class="journal-field-label">接受块:</span><span class="journal-field-val mono">' + renderHash(d.accepting, '接受块哈希') + '</span></div>' +
-      '</div>'; +
-        '<div class="journal-field"><span class="journal-field-label">过滤说明:</span><span class="journal-field-val" style="color:var(--muted);">' + reasonText + '</span></div>' +
-      '</div>' +
-      (rejText ? '<div class="mono" style="font-size:11px;color:var(--dim);margin-top:4px;word-break:break-all;overflow-wrap:anywhere;">拒绝详情: ' + rejText + '</div>' : '') +
-      btnTrack;
+      '</div>';
+    } else if (l.kind === 'REST_HINT_SPENDER_FOUND') {
+      tagClass = 'tag-standby';
+      kindLabel = '⚡ REST 辅助探针命中花费 (Spender Oracle)';
+      bodyHtml = '<div class="journal-grid">' +
+        '<div class="journal-field"><span class="journal-field-label">轮次 ID:</span><span class="journal-field-val mono">' + renderHash(d.round, '轮次 ID') + '</span></div>' +
+        '<div class="journal-field"><span class="journal-field-label">花费 TXID:</span><span class="journal-field-val mono">' + renderHash(d.txid, '花费 TXID') + '</span></div>' +
+        '<div class="journal-field"><span class="journal-field-label">接受块:</span><span class="journal-field-val mono">' + renderHash(d.accepting, '接受块哈希') + '</span></div>' +
+      '</div>';
     } else if (l.kind === 'ERROR') {
       tagClass = 'tag-rose';
       borderStyle = 'border-left: 3px solid var(--rose);';
