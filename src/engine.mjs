@@ -99,7 +99,7 @@ export class Engine {
     const tips = new Map(this.store.rounds({liveOnly: true}).map(r => [outpointKey(r.data.tip), r.id]));
     for (const raw of data?.removed ?? []) {
       const u = normalizeUtxo(raw), id = tips.get(outpointKey(u.outpoint));
-      if (id) { this.store.log('SPENT_EVENT', {round: id, outpoint: u.outpoint}, at); this.store.markTipSpent(id, u.outpoint, at); this.run('spend:' + id, () => this.resolveSpend(id, at)); }
+      if (id) { this.store.log('SPENT_EVENT', {round: id, cid: this.store.round(id)?.data?.cid ?? null, outpoint: u.outpoint}, at); this.store.markTipSpent(id, u.outpoint, at); this.run('spend:' + id, () => this.resolveSpend(id, at)); }
     }
     for (const raw of data?.added ?? []) {
       const u = normalizeUtxo(raw);
@@ -356,21 +356,26 @@ export class Engine {
         inputs: (raw.inputs || []).map(i => ({
           previousOutpoint: {
             transactionId: i.previous_outpoint_hash,
-            index: Number(i.previous_outpoint_index)
+            index: Number(i.previous_outpoint_index ?? 0)
           },
           signatureScript: i.signature_script || '',
           sequence: String(i.sequence ?? 0),
           sigOpCount: i.sig_op_count ?? 1
         })),
-        outputs: (raw.outputs || []).map(o => ({
-          value: String(o.amount ?? 0),
-          scriptPublicKey: typeof o.script_public_key === 'object' && o.script_public_key !== null
-            ? o.script_public_key
-            : {version: 0, script: String(o.script_public_key || '')},
-          verboseData: {
-            scriptPublicKeyAddress: o.script_public_key_address || null
-          }
-        })),
+        outputs: (raw.outputs || []).map(o => {
+          // The REST API returns script_public_key either as a hex string or as an object whose
+          // version may be null. Normalize to the consensus shape: BigInt(version) must never see null.
+          const spk = typeof o.script_public_key === 'object' && o.script_public_key !== null
+            ? {version: Number(o.script_public_key.version ?? 0), script: String(o.script_public_key.script ?? '')}
+            : {version: Number(o.script_public_key_version ?? 0), script: String(o.script_public_key ?? '')};
+          return {
+            value: String(o.amount ?? 0),
+            scriptPublicKey: spk,
+            verboseData: {
+              scriptPublicKeyAddress: o.script_public_key_address || null
+            }
+          };
+        }),
         verboseData: {
           transactionId: txid,
           blockHash: raw.accepting_block_hash || (Array.isArray(raw.block_hash) ? raw.block_hash[0] : null)
@@ -610,6 +615,9 @@ export class Engine {
 
   async applySpend(rec, chosen, acc) {
     const plugin = this.contracts.get(rec.contract);           // the rules this round was created under
+    // Contract plugins hash and validate consensus fields with BigInt(); V2 'High' rows carry version/lockTime as
+    // null. Normalize at the boundary so no path (window, REST hint, mempool, replay) can push null into BigInt.
+    chosen = {...chosen, tx: normalizeConsensusFields(chosen.tx)};
     let next;
     try { next = checkRound(plugin.advance(rec.data, chosen.tx, {hash: acc.hash, daa: String(acc.daa)}), plugin.key); }
     catch (e) { const r = this.markStale(rec, chosen, acc, e); await this.unsubscribe(rec.address); return r; }
@@ -936,3 +944,30 @@ function spendsLoose(tx, tip) {
 }
 
 function safeKind(plugin, tx) { try { return String(plugin.kindOf(tx)).slice(0, 32) || 'UNKNOWN'; } catch { return 'UNKNOWN'; } }
+
+/** V2 'High' verbosity omits version/lockTime (null) and may omit per-output spk version. Fill consensus defaults. */
+function normalizeConsensusFields(tx) {
+  if (!tx || typeof tx !== 'object') return tx;
+  const out = {...tx};
+  if (out.version == null) out.version = 1;
+  if (out.lockTime == null) out.lockTime = '0';
+  else out.lockTime = String(out.lockTime);
+  if (out.gas == null) out.gas = '0';
+  else out.gas = String(out.gas);
+  if (out.payload == null) out.payload = '';
+  if (out.subnetworkId == null) out.subnetworkId = '0000000000000000000000000000000000000000';
+  if (Array.isArray(out.outputs)) {
+    out.outputs = out.outputs.map(o => {
+      const spk = o?.scriptPublicKey ?? {};
+      return {...o, value: o?.value == null ? '0' : String(o.value),
+        scriptPublicKey: {version: Number(spk.version ?? 0), script: String(spk.script ?? '')}};
+    });
+  }
+  if (Array.isArray(out.inputs)) {
+    out.inputs = out.inputs.map(i => ({...i,
+      sequence: i?.sequence == null ? '0' : String(i.sequence),
+      signatureScript: i?.signatureScript ?? '',
+      previousOutpoint: {...(i?.previousOutpoint ?? {}), index: Number(i?.previousOutpoint?.index ?? 0)}}));
+  }
+  return out;
+}

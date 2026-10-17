@@ -44,7 +44,9 @@ export function relatedTransaction(tx, tip, cid = null) {
 
 /** The pinned F3 adapter needs consensus fields that V2 Low/High omit (see 2026-09-27 incident). */
 export function isFullTransaction(tx) {
-  return !!txidOf(tx) && tx.version !== undefined && tx.lockTime !== undefined &&
+  // V2 'High' verbosity returns version/lockTime as null (not undefined), so a null check is required:
+  // treating null as "present" skipped hydrate() and pushed null into BigInt() inside the contract plugin.
+  return !!txidOf(tx) && tx.version != null && tx.lockTime != null &&
     Array.isArray(tx.inputs) && Array.isArray(tx.outputs) && tx.inputs.every(i => typeof i.signatureScript === 'string');
 }
 

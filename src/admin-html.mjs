@@ -1332,7 +1332,8 @@ function renderJournalFeed(logs) {
       kindLabel = '⚡ 链尖 UTXO 花费事件';
       const op = d.outpoint ? renderHash(d.outpoint.transactionId + ':' + d.outpoint.index, 'Outpoint') : '-';
       bodyHtml = '<div class="journal-grid">' +
-        '<div class="journal-field"><span class="journal-field-label">轮次 ID:</span><span class="journal-field-val mono">' + renderHash(d.round, '轮次 ID') + '</span></div>' +
+        '<div class="journal-field"><span class="journal-field-label">创世 TXID:</span><span class="journal-field-val mono">' + renderHash(d.round, '创世 TXID') + '</span></div>' +
+        '<div class="journal-field"><span class="journal-field-label">轮次 CID:</span><span class="journal-field-val mono">' + renderHash(d.cid || '-', '轮次 CID') + '</span></div>' +
         '<div class="journal-field"><span class="journal-field-label">已花费 Tip:</span><span class="journal-field-val mono">' + op + '</span></div>' +
       '</div><div style="font-size:11px;color:var(--muted);margin-top:4px;">节点推送此 UTXO 被花费，触发后继状态机解析</div>';
     } else if (l.kind === 'ROLLBACK' || l.kind === 'ROLLBACK_REPLAY') {
