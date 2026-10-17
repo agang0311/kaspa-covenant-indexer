@@ -1267,6 +1267,30 @@ async function refreshAll() {
   }
 }
 
+window.copyHash = function(text, label) {
+  label = label || '哈希';
+  if (!text) return;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(function() {
+      showToast('已复制完整 ' + label + ' 到剪贴板', 'var(--emerald)');
+    }).catch(function() {
+      prompt('请按 Ctrl+C 复制完整 ' + label + '：', text);
+    });
+  } else {
+    prompt('请按 Ctrl+C 复制完整 ' + label + '：', text);
+  }
+};
+
+function renderHash(val, label) {
+  if (!val) return '-';
+  label = label || '哈希';
+  const clean = String(val);
+  return '<span class="mono" style="word-break:break-all;user-select:all;cursor:pointer;" title="点击复制完整 ' + label + '" onclick="copyHash(' + JSON.stringify(clean) + ', ' + JSON.stringify(label) + ')">' +
+    clean +
+    ' <span style="font-size:11px;opacity:0.75;cursor:pointer;" title="点击复制完整内容">📋</span>' +
+  '</span>';
+}
+
 // Render Journal Feed into clean human-readable cards
 function renderJournalFeed(logs) {
   const container = document.getElementById('journalFeed');
@@ -1290,18 +1314,18 @@ function renderJournalFeed(logs) {
       tagClass = 'tag-active';
       kindLabel = '✓ 链上转移生效 (' + (d.kind || 'ACTION') + ')';
       bodyHtml = '<div class="journal-grid">' +
-        '<div class="journal-field"><span class="journal-field-label">轮次 ID:</span><span class="journal-field-val mono">' + (d.round ? d.round.slice(0, 16) + '...' : '-') + '</span></div>' +
+        '<div class="journal-field"><span class="journal-field-label">轮次 ID:</span><span class="journal-field-val mono">' + renderHash(d.round, '轮次 ID') + '</span></div>' +
         '<div class="journal-field"><span class="journal-field-label">序号:</span><span class="journal-field-val mono">Seq #' + (d.seq ?? '-') + '</span></div>' +
-        '<div class="journal-field"><span class="journal-field-label">交易 TXID:</span><span class="journal-field-val mono">' + (d.txid ? d.txid.slice(0, 16) + '...' : '-') + '</span></div>' +
-        '<div class="journal-field"><span class="journal-field-label">接受块:</span><span class="journal-field-val mono">' + (d.accepting ? d.accepting.slice(0, 16) + '...' : '-') + '</span></div>' +
+        '<div class="journal-field"><span class="journal-field-label">交易 TXID:</span><span class="journal-field-val mono">' + renderHash(d.txid, '交易 TXID') + '</span></div>' +
+        '<div class="journal-field"><span class="journal-field-label">接受块:</span><span class="journal-field-val mono">' + renderHash(d.accepting, '接受块哈希') + '</span></div>' +
         '<div class="journal-field"><span class="journal-field-label">状态核验:</span><span class="journal-field-val mono" style="color:var(--kaspa);">' + (d.utxoCheck || 'PASS') + '</span></div>' +
       '</div>';
     } else if (l.kind === 'SPENT_EVENT') {
       tagClass = 'tag-standby';
       kindLabel = '⚡ 链尖 UTXO 花费事件';
-      const op = d.outpoint ? (d.outpoint.transactionId?.slice(0, 16) + '...:' + d.outpoint.index) : '-';
+      const op = d.outpoint ? renderHash(d.outpoint.transactionId + ':' + d.outpoint.index, 'Outpoint') : '-';
       bodyHtml = '<div class="journal-grid">' +
-        '<div class="journal-field"><span class="journal-field-label">轮次 ID:</span><span class="journal-field-val mono">' + (d.round ? d.round.slice(0, 16) + '...' : '-') + '</span></div>' +
+        '<div class="journal-field"><span class="journal-field-label">轮次 ID:</span><span class="journal-field-val mono">' + renderHash(d.round, '轮次 ID') + '</span></div>' +
         '<div class="journal-field"><span class="journal-field-label">已花费 Tip:</span><span class="journal-field-val mono">' + op + '</span></div>' +
       '</div><div style="font-size:11px;color:var(--muted);margin-top:4px;">节点推送此 UTXO 被花费，触发后继状态机解析</div>';
     } else if (l.kind === 'ROLLBACK' || l.kind === 'ROLLBACK_REPLAY') {
@@ -1309,9 +1333,9 @@ function renderJournalFeed(logs) {
       borderStyle = 'border-left: 3px solid var(--amber);';
       kindLabel = l.kind === 'ROLLBACK' ? '⚠️ 选定链重组回退 (Rollback)' : '🔄 重组快速重放恢复 (Replay)';
       bodyHtml = '<div class="journal-grid">' +
-        '<div class="journal-field"><span class="journal-field-label">轮次 ID:</span><span class="journal-field-val mono">' + (d.round ? d.round.slice(0, 16) + '...' : '-') + '</span></div>' +
+        '<div class="journal-field"><span class="journal-field-label">轮次 ID:</span><span class="journal-field-val mono">' + renderHash(d.round, '轮次 ID') + '</span></div>' +
         (d.fromSeq !== undefined ? '<div class="journal-field"><span class="journal-field-label">回退起始:</span><span class="journal-field-val mono">Seq #' + d.fromSeq + '</span></div>' : '') +
-        (d.txid ? '<div class="journal-field"><span class="journal-field-label">重放 TXID:</span><span class="journal-field-val mono">' + d.txid.slice(0, 16) + '...</span></div>' : '') +
+        (d.txid ? '<div class="journal-field"><span class="journal-field-label">重放 TXID:</span><span class="journal-field-val mono">' + renderHash(d.txid, '重放 TXID') + '</span></div>' : '') +
       '</div>';
     } else if (l.kind === 'DISCOVERY_MARKER') {
       const discKey = (d.txid || '') + ':' + (d.contract || '');
@@ -1321,7 +1345,7 @@ function renderJournalFeed(logs) {
       kindLabel = '🔍 发现新契约创世 (Discovery)';
       bodyHtml = '<div class="journal-grid">' +
         '<div class="journal-field"><span class="journal-field-label">合约规则:</span><span class="journal-field-val mono">' + (d.contract || '-') + '</span></div>' +
-        '<div class="journal-field"><span class="journal-field-label">创世 TXID:</span><span class="journal-field-val mono">' + (d.txid ? d.txid.slice(0, 16) + '...' : '-') + '</span></div>' +
+        '<div class="journal-field"><span class="journal-field-label">创世 TXID:</span><span class="journal-field-val mono">' + renderHash(d.txid, '创世 TXID') + '</span></div>' +
         '<div class="journal-field"><span class="journal-field-label">发生 DAA:</span><span class="journal-field-val mono">' + (d.daa || '-') + '</span></div>' +
       '</div>';
     } else if (l.kind === 'GENESIS_IGNORED') {
@@ -1331,7 +1355,26 @@ function renderJournalFeed(logs) {
       const rejText = Array.isArray(d.rejected) ? d.rejected.map(r => (r.contract ? r.contract.slice(0, 24) + '...' : '契约') + ': ' + (r.reason || '不匹配')).join('; ') : '';
       const btnTrack = d.txid ? ('<div style="margin-top:8px;"><button class="btn btn-sm" style="padding:3px 10px;font-size:11px;" onclick="trackGenesis(&quot;' + d.txid + '&quot;)">🎯 让索引器自动追此轮</button></div>') : '';
       bodyHtml = '<div class="journal-grid">' +
-        '<div class="journal-field"><span class="journal-field-label">创世 TXID:</span><span class="journal-field-val mono">' + (d.txid ? d.txid.slice(0, 16) + '...' : '-') + '</span></div>' +
+        '<div class="journal-field"><span class="journal-field-label">创世 TXID:</span><span class="journal-field-val mono">' + renderHash(d.txid, '创世 TXID') + '</span></div>' +
+        '<div class="journal-field"><span class="journal-field-label">过滤说明:</span><span class="journal-field-val" style="color:var(--muted);">' + reasonText + '</span></div>' +
+      '</div>' +
+      (rejText ? '<div class="mono" style="font-size:11px;color:var(--dim);margin-top:4px;word-break:break-all;overflow-wrap:anywhere;">拒绝详情: ' + rejText + '</div>' : '') +
+      btnTrack;
+    } else if (l.kind === 'WINDOW_SCAN_FAILED') {
+      tagClass = 'tag-warn';
+      borderStyle = 'border-left: 3px solid var(--amber);';
+      kindLabel = '⚠️ 链上滑动窗口检索异常 (Window Scan)';
+      bodyHtml = '<div class="journal-grid">' +
+        '<div class="journal-field"><span class="journal-field-label">起始块:</span><span class="journal-field-val mono">' + renderHash(d.start, '起始块哈希') + '</span></div>' +
+        '<div class="journal-field"><span class="journal-field-label">异常原因:</span><span class="journal-field-val mono" style="color:var(--rose);">' + (d.message || '-') + '</span></div>' +
+      '</div>';
+    } else if (l.kind === 'REST_HINT_GENESIS_FOUND') {
+      tagClass = 'tag-active';
+      kindLabel = '⚡ REST 定位命中创世 (Spender Oracle)';
+      bodyHtml = '<div class="journal-grid">' +
+        '<div class="journal-field"><span class="journal-field-label">创世 TXID:</span><span class="journal-field-val mono">' + renderHash(d.txid, '创世 TXID') + '</span></div>' +
+        '<div class="journal-field"><span class="journal-field-label">接受块:</span><span class="journal-field-val mono">' + renderHash(d.accepting, '接受块哈希') + '</span></div>' +
+      '</div>'; +
         '<div class="journal-field"><span class="journal-field-label">过滤说明:</span><span class="journal-field-val" style="color:var(--muted);">' + reasonText + '</span></div>' +
       '</div>' +
       (rejText ? '<div class="mono" style="font-size:11px;color:var(--dim);margin-top:4px;word-break:break-all;overflow-wrap:anywhere;">拒绝详情: ' + rejText + '</div>' : '') +
@@ -1416,8 +1459,8 @@ document.getElementById('btnTraceTxid').onclick = async () => {
     const borderColor = isNew ? 'var(--kaspa)' : 'var(--indigo)';
 
     let fieldsHtml = '';
-    if (res.cid) fieldsHtml += '<div class="journal-field"><span class="journal-field-label">Covenant ID:</span><span class="journal-field-val mono"><b>' + res.cid.slice(0, 16) + '...</b></span></div>';
-    if (res.genesisTxid) fieldsHtml += '<div class="journal-field"><span class="journal-field-label">创世 TXID:</span><span class="journal-field-val mono">' + res.genesisTxid.slice(0, 16) + '...</span></div>';
+    if (res.cid) fieldsHtml += '<div class="journal-field"><span class="journal-field-label">Covenant ID:</span><span class="journal-field-val mono"><b>' + renderHash(res.cid, 'Covenant ID') + '</b></span></div>';
+    if (res.genesisTxid) fieldsHtml += '<div class="journal-field"><span class="journal-field-label">创世 TXID:</span><span class="journal-field-val mono">' + renderHash(res.genesisTxid, '创世 TXID') + '</span></div>';
     if (res.contract) fieldsHtml += '<div class="journal-field"><span class="journal-field-label">契约版本:</span><span class="journal-field-val mono">' + res.contract + '</span></div>';
     if (res.phase !== undefined && res.phase !== null) fieldsHtml += '<div class="journal-field"><span class="journal-field-label">当前阶段:</span><span class="journal-field-val">Phase ' + res.phase + '</span></div>';
     if (res.terminal) fieldsHtml += '<div class="journal-field"><span class="journal-field-label">终局状态:</span><span class="journal-field-val" style="color:var(--kaspa);font-weight:700;">' + res.terminal + '</span></div>';
@@ -1740,8 +1783,8 @@ async function loadPluginsTab() {
       if (regCount > 0) {
         const first = watchAddrs[0];
         const shortAddr = first.length > 26 ? (first.slice(0, 14) + '...' + first.slice(-8)) : first;
-        watchText = '<span class="tag tag-active mono" title="' + watchAddrs.join(', ') + '" style="font-size:11px;cursor:help;">' +
-          (regCount === 1 ? shortAddr : (regCount + ' 个地址 (' + shortAddr + ')')) +
+        watchText = '<span class="tag tag-active mono" title="' + watchAddrs.join(', ') + ' (点击复制)" onclick="copyHash(' + JSON.stringify(first) + ', \\'监听地址\\')" style="font-size:11px;cursor:pointer;">' +
+          (regCount === 1 ? shortAddr : (regCount + ' 个地址 (' + shortAddr + ')')) + ' 📋' +
           '</span>';
       }
       const keyName = p.key || (cfg.options?.id ? (cfg.options.id + '@' + (cfg.options.version || '1.0.0')) : cfg.module);
@@ -1749,7 +1792,7 @@ async function loadPluginsTab() {
       return '<tr>' +
         '<td class="mono"><b>' + keyName + '</b></td>' +
         '<td class="mono">' + (cfg.module || '-') + '</td>' +
-        '<td class="mono" style="font-size:12px;color:var(--muted);">' + (p.profileId ? p.profileId.slice(0, 16) + '...' : '-') + '</td>' +
+        '<td class="mono" style="font-size:12px;color:var(--muted);">' + (p.profileId ? renderHash(p.profileId, 'Profile ID') : '-') + '</td>' +
         '<td>' + watchText + '</td>' +
         '<td>' + (cfg.retired ? '<span class="tag tag-retired">RETIRED (兼容)</span>' : '<span class="tag tag-active">ACTIVE (主导)</span>') + '</td>' +
         '<td>' +

@@ -251,7 +251,7 @@ export class Engine {
       let r;
       try {
         r = this.node.url && this.config.windowWorkerPages
-          ? await this.windowChunk({...args, url: this.node.url, network: this.config.network, maxPages: this.config.windowWorkerPages, budgetMs: Math.max(1, until - this.now())})
+          ? await this.windowChunk({...args, url: this.node.url, network: this.config.networkId ?? this.config.network, maxPages: this.config.windowWorkerPages, budgetMs: Math.max(1, until - this.now())})
           : await scanWindow(this.node, {match: t => spendsOutpoint(t, tip), ...cur, sinkBlue, windowBlue: this.config.windowBlue, until, now: this.now});
       } catch (e) {
         if (/WINDOW_START_NOT_CHAIN/.test(String(e?.message))) save(null); else mark();
