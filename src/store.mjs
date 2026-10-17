@@ -81,7 +81,7 @@ export class Store {
     return this.db.prepare(`SELECT * FROM rounds ${liveOnly ? "WHERE status='LIVE'" : ''} ORDER BY id`).all().map(rowRound);
   }
   byCid(cid) {
-    return this.db.prepare("SELECT * FROM rounds WHERE json_extract(data,'$.cid')=? AND status!='ROLLED_BACK' LIMIT 2").all(cid).map(rowRound);
+    return this.db.prepare("SELECT * FROM rounds WHERE (json_extract(data,'$.cid')=? OR id=? OR json_extract(data,'$.genesisTxid')=?) AND status!='ROLLED_BACK' LIMIT 2").all(cid, cid, cid).map(rowRound);
   }
   cidPage(after, limit, category = null) {
     // Same rule as api.mjs categoryOf: Kaswin V2.0.2 is the only supported contract family. '.' is literal in LIKE.

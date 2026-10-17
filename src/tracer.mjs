@@ -164,10 +164,10 @@ export async function traceAndTrackTxid(txid, {store, engine, restUrl, now = () 
   // 5. Transaction is a NEW covenant round! Enqueue Genesis task to engine for automatic catch-up
   const taskAt = now();
   store.discoverTask(genesisTxid, {eventAt: taskAt}, taskAt);
-  store.db.prepare("UPDATE discoveries SET status='PENDING', error=NULL WHERE txid=?").run(genesisTxid);
+  store.db.prepare("UPDATE discoveries SET status='PENDING', attempts=0, error=NULL WHERE txid=?").run(genesisTxid);
 
   if (engine && typeof engine.discoverGenesis === 'function') {
-    engine.run('genesis:' + genesisTxid, () => engine.discoverGenesis(genesisTxid));
+    engine.run('genesis:' + genesisTxid, () => engine.discoverGenesis(genesisTxid, {}, {force: true}));
   }
 
   return {

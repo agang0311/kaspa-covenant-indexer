@@ -124,6 +124,13 @@ export async function openDualNode({open, urls, log = () => {}, reconnectMs = [1
       try { return await fn(m.node); }
       catch (e) {
         const msg = String(e?.message ?? e);
+        if (/cannot find header/i.test(msg)) {
+          // Active member may be slightly behind (catching up); try the other live member before failing!
+          const other = members.find(x => x !== m && x.up && x.node);
+          if (other) {
+            try { return await fn(other.node); } catch {}
+          }
+        }
         if (!/WebSocket|not connected|disconnected|CONNECT_TIMEOUT/i.test(msg)) throw e;   // RPC-level errors are answers
         markDown(m, name + ':' + msg.slice(0, 80));
       }

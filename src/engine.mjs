@@ -408,7 +408,12 @@ export class Engine {
         const h = await this.header(data.accepting_block_hash);
         if (h?.isChain) start = h.selectedParent ?? data.accepting_block_hash;
       } catch {}
-      this.store.log('REST_HINT_GENESIS_FOUND', {txid, accepting: data.accepting_block_hash}, this.now());
+      if (!this._seenRestHints) this._seenRestHints = new Set();
+      const hintKey = `${txid}:${data.accepting_block_hash}`;
+      if (!this._seenRestHints.has(hintKey)) {
+        this._seenRestHints.add(hintKey);
+        this.store.log('REST_HINT_GENESIS_FOUND', {txid, accepting: data.accepting_block_hash}, this.now());
+      }
       return {acceptingBlockHash: data.accepting_block_hash, start};
     } catch {
       return null;
@@ -689,9 +694,13 @@ export class Engine {
   }
 
   // ---------- genesis discovery (registry marker event or manual track) ----------
-  async discoverGenesis(txid, hint = {}) {
+  async discoverGenesis(txid, hint = {}, {force = false} = {}) {
     const task = this.store.discoverTask(txid, hint, this.now());
-    if ((task.attempts ?? 0) >= 15) {
+    if (force) {
+      task.attempts = 0;
+      this.store.db.prepare("UPDATE discoveries SET attempts=0, status='PENDING' WHERE txid=?").run(txid);
+    }
+    if (!force && (task.attempts ?? 0) >= 40) {
       this.store.discoveryResult(txid, 'IGNORED', this.now(), task.error ?? 'EXCEEDED_MAX_ATTEMPTS');
       return 'IGNORED';
     }
@@ -713,10 +722,8 @@ export class Engine {
     const fastFrom = starts ? null : this.fastStart(eventAt);
     let found = await this.tryFast('genesis:' + txid, t => t?.verboseData?.transactionId === txid, fastFrom);
     if (found) {
-      if (daa != null && BigInt(daa) !== found.acc.daa) {
-        const again = await this.tryFast('genesis-recheck:' + txid, t => t?.verboseData?.transactionId === txid, fastFrom);
+      if (daa != null && (BigInt(daa) > found.acc.daa || found.acc.daa - BigInt(daa) > 200n)) {
         this.store.log('REGISTRY_EVENT_DAA_DIFFERENCE', {txid, notificationDaa: String(daa), acceptingDaa: String(found.acc.daa), accepting: found.acc.hash, path: 'fast'}, this.now());
-        if (!again || again.acc.hash !== found.acc.hash || again.acc.daa !== found.acc.daa) return 'PENDING';
       }
       if (!isFullTransaction(found.tx)) found = null;          // never guess consensus fields: slow path hydrates
       else { this.pending.delete('genesis:' + txid); return this.applyGenesis(txid, found, contract, found.tx, 'vc-full'); }
@@ -737,11 +744,8 @@ export class Engine {
     found = acc ? await this.acceptedHigh(txid, acc) : null;
     if (!found) return this.defer('genesis:' + txid, {kind: 'genesis', id: txid, hint: {eventAt, daa, starts, contract}}, 'GENESIS_NOT_FOUND');
     this.pending.delete('genesis:' + txid);
-    if (daa != null && BigInt(daa) !== found.acc.daa) {
-      const rechecked = await this.acceptance(txid, from);
+    if (daa != null && (BigInt(daa) > found.acc.daa || found.acc.daa - BigInt(daa) > 200n)) {
       this.store.log('REGISTRY_EVENT_DAA_DIFFERENCE', {txid, notificationDaa: String(daa), acceptingDaa: String(found.acc.daa), accepting: found.acc.hash}, this.now());
-      if (!rechecked || rechecked.hash !== found.acc.hash || rechecked.daa !== found.acc.daa)
-        return 'PENDING';
     }
     return this.applyGenesis(txid, found, contract, null, 'vc-high+block');
   }
