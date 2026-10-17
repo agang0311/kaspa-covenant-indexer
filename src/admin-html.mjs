@@ -788,6 +788,20 @@ input:focus, select:focus, textarea:focus {
     <!-- 候选节点池列表 -->
     <div class="card" style="padding:0;overflow:hidden;margin-bottom:16px;">
       <div style="padding:12px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;">
+        <span style="font-weight:700;">📌 已入池的自定义节点 (Managed Pool)</span>
+        <span style="color:var(--muted);font-size:11px;">这些地址已持久化，会参与主备选举；可直接移除</span>
+      </div>
+      <div class="table-wrap" style="border-bottom:1px solid var(--border);">
+        <table>
+          <thead>
+            <tr><th>节点地址</th><th>加入时间</th><th>当前连接</th><th>操作</th></tr>
+          </thead>
+          <tbody id="tblManagedPool">
+            <tr><td colspan="4" style="text-align:center;color:var(--muted);">暂无自定义池节点（可在下方测速后点「+ 加入池」，或在上方自定义探测里加入）</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div style="padding:12px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;">
         <span style="font-weight:700;">🌐 候选节点池健康矩阵 (TN10 Seeds & Pool)</span>
         <span style="color:var(--muted);font-size:11px;">注：标记【共享后端】的节点属于同一物理实例，不可互为双备</span>
       </div>
@@ -819,6 +833,7 @@ input:focus, select:focus, textarea:focus {
       <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
         <input type="text" id="inputProbeUrl" class="mono" placeholder="ws://127.0.0.1:17210 或 wss://..." value="wss://quark-10.kaspa.red/kaspa/testnet-10/wrpc/json" style="flex:1;min-width:200px;">
         <button class="btn btn-sm" id="btnProbeNode" style="white-space:nowrap;">🚀 测速与体检</button>
+        <button class="btn btn-sm btn-pri" id="btnProbeAddPool" style="white-space:nowrap;">＋ 加入候选池</button>
       </div>
       <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:11px;color:var(--muted);">
         <span>快捷测试:</span>
@@ -1497,6 +1512,33 @@ async function loadNodePoolBenchmark() {
   }
 }
 
+// Managed pool: the authoritative list of operator-added nodes (independent of a probe run).
+async function loadManagedPool() {
+  const tbody = document.getElementById('tblManagedPool');
+  if (!tbody) return;
+  try {
+    const res = await api('/pool');
+    const list = res.managed || [];
+    if (!list.length) {
+      tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--muted);">暂无自定义池节点（可在下方测速后点「+ 加入池」，或在上方自定义探测里加入）</td></tr>';
+      return;
+    }
+    const connected = res.connected || [];
+    tbody.innerHTML = list.map(n => {
+      const when = n.addedAt ? new Date(n.addedAt).toLocaleString() : '-';
+      const isUp = connected.includes(n.url);
+      return '<tr>' +
+        '<td class="mono" style="word-break:break-all;"><b>' + n.url + '</b></td>' +
+        '<td class="mono" style="font-size:11px;color:var(--muted);">' + when + '</td>' +
+        '<td>' + (isUp ? '<span class="tag tag-active">● 已连接</span>' : '<span class="tag tag-retired">未连接</span>') + '</td>' +
+        '<td><button class="btn btn-sm" style="color:var(--rose);border-color:rgba(239,68,68,0.3);" onclick="poolRemove(' + JSON.stringify(n.url) + ')">移出池</button></td>' +
+      '</tr>';
+    }).join('');
+  } catch (err) {
+    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--rose);">读取池失败: ' + err.message + '</td></tr>';
+  }
+}
+
 document.getElementById('btnBenchmarkPool').onclick = loadNodePoolBenchmark;
 
 // Operator-managed pool nodes: persist a probed endpoint into this network's candidate pool, or drop it.
@@ -1505,7 +1547,8 @@ window.poolAdd = async function (url) {
     const res = await api('/pool/add', 'POST', {url});
     if (res.ok) {
       const v = res.verified || {};
-      showToast('已加入候选池：' + url + ' · ' + (v.networkId || '') + ' · p2p ' + String(v.p2pId || '-').slice(0, 8) + '\\n下次探测/换血时参与主备选举', 'var(--emerald)');
+      showToast('已加入候选池：' + url + ' · ' + (v.networkId || '') + ' · p2p ' + String(v.p2pId || '-').slice(0, 8) + '. 下次探测或换血时参与选举。', 'var(--emerald)');
+      await loadManagedPool();
       await loadNodePoolBenchmark();
     }
   } catch (err) {
@@ -1514,11 +1557,12 @@ window.poolAdd = async function (url) {
 };
 
 window.poolRemove = async function (url) {
-  if (!confirm('确认从候选池移除该节点？\\n' + url + '\\n\\n已建立的连接不受影响，下次探测/换血时生效。')) return;
+  if (!confirm('确认从候选池移除该节点？ ' + url + ' —— 已建立的连接不受影响，下次探测或换血时生效。')) return;
   try {
     const res = await api('/pool/remove', 'POST', {url});
     if (res.ok) {
       showToast('已从候选池移除：' + url, 'var(--emerald)');
+      await loadManagedPool();
       await loadNodePoolBenchmark();
     }
   } catch (err) {
@@ -1555,6 +1599,35 @@ window.probeSingle = function(url) {
 };
 
 // 3. Custom Node Probe
+document.getElementById('btnProbeAddPool').onclick = async () => {
+  const url = document.getElementById('inputProbeUrl').value.trim();
+  const box = document.getElementById('probeResultBox');
+  box.style.display = 'block';
+  if (!(url.startsWith('ws://') || url.startsWith('wss://'))) { box.innerHTML = '<div class="card" style="border-color:var(--rose);">请输入以 ws:// 或 wss:// 开头的完整节点地址。</div>'; return; }
+  box.innerHTML = '<div style="color:var(--muted);">正在校验该节点网络身份并写入候选池...</div>';
+  try {
+    const r = await api('/pool/add', 'POST', { url });
+    if (!r.ok) throw new Error(r.error);
+    const v = r.verified || {};
+    box.innerHTML = '<div class="card" style="background:var(--bg-panel-elevated);border-color:var(--emerald);">' +
+      '<strong style="color:var(--emerald);">✓ 已加入候选池</strong>' +
+      '<div style="font-size:12px;line-height:1.7;margin-top:6px;">' +
+        '节点: <span class="mono" style="word-break:break-all;">' + url + '</span><br>' +
+        '网络: <b class="mono">' + (v.networkId || '-') + '</b> · p2p: <b class="mono">' + String(v.p2pId || '-').slice(0, 12) + '</b> · 版本: <b class="mono">' + (v.serverVersion || '-') + '</b><br>' +
+        'DAA: <b class="mono">' + (v.virtualDaaScore || '-') + '</b> · 同步 ✓ · UTXO 索引 ✓' +
+      '</div>' +
+      '<div style="font-size:11px;color:var(--muted);margin-top:6px;">已持久化到当前网络的数据库；下次探测或主备换血时参与选举。</div>' +
+    '</div>';
+    showToast('已加入候选池：' + url, 'var(--emerald)');
+  } catch (err) {
+    box.innerHTML = '<div class="card" style="border-color:var(--rose);background:rgba(239,68,68,0.1);">' +
+      '<strong style="color:var(--rose);">❌ 未能加入候选池</strong>' +
+      '<div style="font-size:12px;margin-top:6px;color:var(--muted);word-break:break-all;">' + err.message + '</div>' +
+      '<div style="font-size:11px;color:var(--muted);margin-top:6px;">节点必须与当前查看的网络一致、已同步、且开启 UTXO 索引。</div>' +
+    '</div>';
+  }
+};
+
 document.getElementById('btnProbeNode').onclick = async () => {
   const url = document.getElementById('inputProbeUrl').value.trim();
   const box = document.getElementById('probeResultBox');
@@ -2135,6 +2208,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     document.getElementById(btn.dataset.tab).classList.add('active');
     if (btn.dataset.tab === 'tab-plugins') loadPluginsTab();
     if (btn.dataset.tab === 'tab-nodes') {
+      loadManagedPool();
       if (!window._poolLoaded) { window._poolLoaded = true; loadNodePoolBenchmark(); }
     }
   };
