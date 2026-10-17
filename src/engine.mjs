@@ -844,7 +844,27 @@ export class Engine {
     const rolled = new Set();
     for (const t of open) {
       if (rolled.has(t.roundId)) continue;
-      const h = await this.header(t.accepting);
+      let h = null;
+      try {
+        h = await this.header(t.accepting);
+      } catch (e) {
+        const msg = String(e?.message ?? e);
+        if (/cannot find header/i.test(msg)) {
+          // If the node has pruned this header, it is an ancient historical block (>24h old in DAG history).
+          // Ancient pruned blocks on Kaspa can never be reorged (far past the consensus finality horizon).
+          // If observed over an hour ago, safely mark as FINAL and drain the backlog.
+          const now = this.now();
+          if (now - (t.observedAt ?? 0) > 3600_000) {
+            this.store.tx(() => {
+              this.store.setTransitionStatus(t.roundId, t.seq, 'FINAL');
+              this.store.enqueue(this.relayPayload('final', {...t, status: 'FINAL'}, null), now);
+            });
+            continue;
+          }
+        }
+        // Do not crash the entire finality loop on a single missing or transient header!
+        continue;
+      }
       if (!h.isChain) { await this.rollback(t); rolled.add(t.roundId); continue; }
       if (sink - BigInt(t.acceptingBlueScore) >= this.config.finalityBlueScore) {
         const now = this.now();
