@@ -160,19 +160,42 @@ export function createApi({
       const match = /^\/v1\/rounds\/([^/]+)$/.exec(pathname);
       if (match) {
         if (!HASH.test(match[1]) || [...url.searchParams.keys()].some(k => k !== 'network')) return send(400, {detail: 'INVALID_CID_OR_QUERY'});
-        const rows = vStore.byCid(match[1]);
+        let rows = vStore.byCid(match[1]);
+        if (!rows.length) {
+          // Grace retry: during high-frequency writes or micro-reorg rollbacks, retry once after 80ms before 404
+          await new Promise(r => setTimeout(r, 80));
+          rows = vStore.byCid(match[1]);
+        }
         if (!rows.length) return send(404, {detail: 'NOT_INDEXED', ...meta});
         if (rows.length > 1) return send(409, {detail: 'CID_CONFLICT'});
         return send(200, {item: view(rows[0], true, vStore, virtualDaa), ...meta});
       }
       if (pathname !== '/v1/rounds') return send(404, {detail: 'NOT_FOUND'});
-      for (const key of url.searchParams.keys()) if (!['status', 'limit', 'cursor', 'network'].includes(key) || url.searchParams.getAll(key).length !== 1)
+      const ALLOWED_QUERY = new Set(['status', 'phase', 'terminal', 'limit', 'cursor', 'network']);
+      for (const key of url.searchParams.keys()) {
+        if (!ALLOWED_QUERY.has(key) || url.searchParams.getAll(key).length !== 1)
+          return send(400, {detail: 'INVALID_QUERY'});
+      }
+      const status = url.searchParams.get('status');
+      const rawPhase = url.searchParams.get('phase');
+      const rawTerminal = url.searchParams.get('terminal');
+      const cursor = url.searchParams.get('cursor') ?? '';
+      const rawLimit = url.searchParams.get('limit') ?? '50';
+
+      if (status !== null && !['open', 'sealed', 'close', 'unknown'].includes(status))
         return send(400, {detail: 'INVALID_QUERY'});
-      const status = url.searchParams.get('status'), cursor = url.searchParams.get('cursor') ?? '', rawLimit = url.searchParams.get('limit') ?? '50';
-      if ((status !== null && !['open', 'sealed', 'close', 'unknown'].includes(status)) ||
-          (cursor && !HASH.test(cursor)) || !/^[1-9][0-9]{0,2}$/.test(rawLimit) || Number(rawLimit) > 200)
+      if (rawPhase !== null && !/^[1-9][0-9]?$/.test(rawPhase))
         return send(400, {detail: 'INVALID_QUERY'});
-      const limit = Number(rawLimit), rows = vStore.cidPage(cursor, limit + 1, status), page = rows.slice(0, limit);
+      if (rawTerminal !== null && !/^(true|false)$/i.test(rawTerminal))
+        return send(400, {detail: 'INVALID_QUERY'});
+      if ((cursor && !HASH.test(cursor)) || !/^[1-9][0-9]{0,2}$/.test(rawLimit) || Number(rawLimit) > 200)
+        return send(400, {detail: 'INVALID_QUERY'});
+
+      const phase = rawPhase !== null ? Number(rawPhase) : null;
+      const terminal = rawTerminal !== null ? rawTerminal.toLowerCase() === 'true' : null;
+      const limit = Number(rawLimit);
+      const rows = vStore.cidPage(cursor, limit + 1, status, {phase, terminal});
+      const page = rows.slice(0, limit);
       if (page.some(r => vStore.byCid(r.data.cid).length > 1)) return send(409, {detail: 'CID_CONFLICT'});
       return send(200, {items: page.map(r => view(r, false, vStore, virtualDaa)), nextCursor: rows.length > limit ? page.at(-1).data.cid : null, ...meta});
     } catch { send(500, {detail: 'INTERNAL_ERROR'}); }

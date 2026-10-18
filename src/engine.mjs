@@ -952,16 +952,27 @@ export class Engine {
     return this.watchSet;
   }
 
-  /** Missed-notification safety net: one batched UTXO query for every live round. */
+  /** Missed-notification safety net: batched UTXO query for every active (live/stale) round. */
   async reconcile() {
-    const live = this.store.rounds({liveOnly: true});
-    if (!live.length) return;
-    const r = await this.node.getUtxosByAddresses({addresses: [...new Set(live.map(x => x.address))]});
+    // Include active rounds with a non-null tip so unfinalized spends or self-healing STALE rounds are swept
+    const active = this.store.rounds({activeOnly: true});
+    if (!active.length) return;
+    const addrs = [...new Set(active.map(x => x.address).filter(Boolean))];
+    if (!addrs.length) return;
+    const r = await this.node.getUtxosByAddresses({addresses: addrs});
     const present = new Set((r.entries ?? []).map(normalizeUtxo).map(u => outpointKey(u.outpoint)));
     const now = this.now();
-    for (const x of live) {
-      if (present.has(outpointKey(x.data.tip))) this.store.markLiveSeen(x.id, now);
-      else { this.store.markTipSpent(x.id, x.data.tip, now); this.run('spend:' + x.id, () => this.resolveSpend(x.id)); }
+    for (const x of active) {
+      if (present.has(outpointKey(x.data.tip))) {
+        this.store.markLiveSeen(x.id, now);
+      } else {
+        // Tip is spent on chain! If round was STALE from earlier transient error, un-stale it to self-heal
+        if (x.status === 'STALE') {
+          this.store.db.prepare("UPDATE rounds SET status='LIVE', updated_at=? WHERE id=?").run(now, x.id);
+        }
+        this.store.markTipSpent(x.id, x.data.tip, now);
+        this.run('spend:' + x.id, () => this.resolveSpend(x.id));
+      }
     }
   }
 

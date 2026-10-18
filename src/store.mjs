@@ -77,13 +77,14 @@ export class Store {
   pendingDiscoveries() { return this.db.prepare("SELECT txid,hint FROM discoveries WHERE status='PENDING' ORDER BY updated_at LIMIT 100").all().map(r => ({id:r.txid,hint:dec(r.hint)})); }
 
   round(id) { const r = this.db.prepare('SELECT * FROM rounds WHERE id=?').get(id); return r ? rowRound(r) : null; }
-  rounds({liveOnly = false} = {}) {
-    return this.db.prepare(`SELECT * FROM rounds ${liveOnly ? "WHERE status='LIVE'" : ''} ORDER BY id`).all().map(rowRound);
+  rounds({liveOnly = false, activeOnly = false} = {}) {
+    const where = liveOnly ? "WHERE status='LIVE'" : activeOnly ? "WHERE status IN ('LIVE', 'STALE') AND json_extract(data,'$.tip') IS NOT NULL" : '';
+    return this.db.prepare(`SELECT * FROM rounds ${where} ORDER BY id`).all().map(rowRound);
   }
   byCid(cid) {
     return this.db.prepare("SELECT * FROM rounds WHERE (json_extract(data,'$.cid')=? OR id=? OR json_extract(data,'$.genesisTxid')=?) AND status!='ROLLED_BACK' LIMIT 2").all(cid, cid, cid).map(rowRound);
   }
-  cidPage(after, limit, category = null) {
+  cidPage(after, limit, category = null, {phase = null, terminal = null} = {}) {
     // Same rule as api.mjs categoryOf: Kaswin V2.0.2 is the only supported contract family. '.' is literal in LIKE.
     const bucket = `CASE WHEN status='STALE' OR contract NOT LIKE 'kaswin-v2.0.2@%' THEN 'unknown'
       WHEN status='TERMINAL' THEN 'close'
@@ -91,7 +92,16 @@ export class Store {
       WHEN json_extract(data,'$.state.phase')=2 THEN 'sealed'
       WHEN json_extract(data,'$.state.phase')=5 THEN 'close' ELSE 'unknown' END`;
     return this.db.prepare(`SELECT * FROM rounds WHERE json_extract(data,'$.cid')>? AND status!='ROLLED_BACK'
-      AND (? IS NULL OR (${bucket})=?) ORDER BY json_extract(data,'$.cid'),id LIMIT ?`).all(after, category, category, limit).map(rowRound);
+      AND (? IS NULL OR (${bucket})=?)
+      AND (? IS NULL OR json_extract(data,'$.state.phase')=?)
+      AND (? IS NULL OR (status='TERMINAL')=?)
+      ORDER BY json_extract(data,'$.cid'),id LIMIT ?`).all(
+        after,
+        category, category,
+        phase, phase,
+        terminal === null ? null : (terminal ? 1 : 0), terminal === null ? null : (terminal ? 1 : 0),
+        limit
+      ).map(rowRound);
   }
   putRound(round, address, now, contract) {
     if (!contract) throw Error('ROUND_WITHOUT_CONTRACT');
