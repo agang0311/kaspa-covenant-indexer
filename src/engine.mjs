@@ -599,11 +599,18 @@ export class Engine {
     if (!acc.isChain || !acc.selectedParent) throw Error('HINT_NOT_CHAIN');
     const sink = BigInt((await this.node.getSinkBlueScore()).blueScore);
     if (sink < acc.blueScore) throw Error('HINT_SINK_BEHIND');
-    const min = sink - acc.blueScore > 1n ? Number(sink - acc.blueScore - 1n) : 0;
-    const r = await this.node.getVirtualChainFromBlockV2({startHash:acc.selectedParent,dataVerbosityLevel:'Full',minConfirmationCount:min});
-    const added = (r.addedChainBlockHashes ?? []).map(String), rows = r.chainBlockAcceptedTransactions ?? [];
+    const min = sink - acc.blueScore > 2n ? Number(sink - acc.blueScore - 2n) : 0;
+    let r = await this.node.getVirtualChainFromBlockV2({startHash:acc.selectedParent,dataVerbosityLevel:'Full',minConfirmationCount:min});
+    let added = (r.addedChainBlockHashes ?? []).map(String), rows = r.chainBlockAcceptedTransactions ?? [];
     if ((r.removedChainBlockHashes ?? []).length || rows.length !== added.length) throw Error('HINT_REORG_OR_ROWS');
-    const at = added.indexOf(accepting), row = rows[at];
+    let at = added.indexOf(accepting);
+    if (at < 0 && min > 0) {
+      r = await this.node.getVirtualChainFromBlockV2({startHash:acc.selectedParent,dataVerbosityLevel:'Full',minConfirmationCount:0});
+      added = (r.addedChainBlockHashes ?? []).map(String); rows = r.chainBlockAcceptedTransactions ?? [];
+      if ((r.removedChainBlockHashes ?? []).length || rows.length !== added.length) throw Error('HINT_REORG_OR_ROWS');
+      at = added.indexOf(accepting);
+    }
+    const row = rows[at];
     if (at < 0 || String(row?.chainBlockHeader?.hash) !== accepting || BigInt(row.chainBlockHeader.daaScore) !== acc.daa) throw Error('HINT_ACCEPTANCE_HEADER');
     const hits = (row.acceptedTransactions ?? []).filter(t=>txidOf(t)===txid);
     if (hits.length !== 1) throw Error('HINT_NOT_ACCEPTED');
@@ -791,11 +798,20 @@ export class Engine {
   async acceptedHigh(txid, acc) {
     if (!acc.selectedParent) throw Error('SELECTED_PARENT_MISSING');
     const sink = BigInt((await this.node.getSinkBlueScore()).blueScore), distance = sink - acc.blueScore;
-    const minConfirmationCount = distance > 1n ? Number(distance - 1n) : 0;
-    const r = await this.node.getVirtualChainFromBlockV2({startHash: acc.selectedParent, dataVerbosityLevel: 'High', minConfirmationCount});
-    const added = (r.addedChainBlockHashes ?? []).map(String), rows = r.chainBlockAcceptedTransactions ?? [];
+    // Leave 2 blocks of safety margin so boundary rounding in getVirtualChainFromBlockV2 never strips the target block.
+    const minConfirmationCount = distance > 2n ? Number(distance - 2n) : 0;
+    let r = await this.node.getVirtualChainFromBlockV2({startHash: acc.selectedParent, dataVerbosityLevel: 'High', minConfirmationCount});
+    let added = (r.addedChainBlockHashes ?? []).map(String), rows = r.chainBlockAcceptedTransactions ?? [];
     if (rows.length !== added.length) throw Error('VC_ROWS_NOT_ALIGNED');
-    const i = added.indexOf(acc.hash);
+    let i = added.indexOf(acc.hash);
+    // Boundary edge recovery: if minConfirmationCount narrowly pruned the accepting block, retry with minConfirmationCount: 0!
+    if (i < 0 && minConfirmationCount > 0) {
+      r = await this.node.getVirtualChainFromBlockV2({startHash: acc.selectedParent, dataVerbosityLevel: 'High', minConfirmationCount: 0});
+      added = (r.addedChainBlockHashes ?? []).map(String);
+      rows = r.chainBlockAcceptedTransactions ?? [];
+      if (rows.length !== added.length) throw Error('VC_ROWS_NOT_ALIGNED');
+      i = added.indexOf(acc.hash);
+    }
     if (i < 0) return null;
     const t = (rows[i].acceptedTransactions ?? []).find(x => x?.verboseData?.transactionId === txid);
     if (!t) throw Error('ACCEPTED_ID_WITHOUT_HIGH_ROW');
