@@ -635,7 +635,12 @@ export class Engine {
     if (next.tip) {
       const u = await this.liveUtxo(nextAddress, next.tip);
       if (u) {
-        const ok = u.amount === BigInt(next.value) && sameSpk(u.spk, wireSpk(next.spk)) && u.covenantId === next.cid && u.blockDaaScore === acc.daa;
+        // In GHOSTDAG, a transaction is mined in a containing block (DAA = u.blockDaaScore) and merged into the
+        // selected virtual chain by an accepting chain block (DAA = acc.daa).
+        // Standard consensus invariant: u.blockDaaScore <= acc.daa. Strict equality (===) falsely rejected valid
+        // parallel block merges with SUCCESSOR_UTXO_MISMATCH when containing DAA differed from accepting DAA.
+        const daaOk = u.blockDaaScore <= acc.daa && (acc.daa - u.blockDaaScore <= 200n);
+        const ok = u.amount === BigInt(next.value) && sameSpk(u.spk, wireSpk(next.spk)) && u.covenantId === next.cid && daaOk;
         if (!ok) { await this.unsubscribe(nextAddress); throw Error('SUCCESSOR_UTXO_MISMATCH'); }
         utxoCheck = 'SUCCESSOR_LIVE_MATCHES';
       } else utxoCheck = 'SUCCESSOR_NOT_LIVE_(ALREADY_SPENT_OR_INDEX_LAG)';

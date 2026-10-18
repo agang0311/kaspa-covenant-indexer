@@ -53,7 +53,7 @@ export function createV2RoundAdapter({S, G, accepted, profile, networkGenesis, r
     const known = t.inputs[0].verboseData?.utxoEntry;
     if (known) {
       eq(BigInt(known.amount) === x.value && sameSpk(wireSpk(known.scriptPublicKey), x.scriptPublicKey) &&
-        known.covenantId === x.covenantId && (known.blockDaaScore == null || BigInt(known.blockDaaScore) === x.utxoDaa), 'V2_SPENT_CONTEXT_MISMATCH');
+        known.covenantId === x.covenantId && (known.blockDaaScore == null || BigInt(known.blockDaaScore) <= x.utxoDaa), 'V2_SPENT_CONTEXT_MISMATCH');
     }
     eq(!t.inputs.slice(1).some(i => i.verboseData?.utxoEntry?.covenantId === r.cid), 'V2_MULTIPLE_FAMILY_INPUTS');
     // Engine supplies an accepted transaction; previous verified round material is input0 context.
