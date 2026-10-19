@@ -34,11 +34,19 @@ function view(r, detail = false, store = null, virtualDaa = null) {
   const acc = store ? acceptanceOf(store.latestActive(r.id), virtualDaa) : null;
   // The node already showed the indexed tip as spent; the successor is still being resolved: this state is OUT OF DATE.
   const spentAt = store && r.status === 'LIVE' ? store.tipSpent(r.id, d.tip) : null;
-  return {cid: d.cid, genesisTxid: r.id, contract: r.contract, status: categoryOf(r), phase: d.state?.phase ?? null,
+  const s = d.state;
+  return {cid: d.cid, genesisTxid: r.id, contract: r.contract, status: categoryOf(r), phase: s?.phase ?? null,
     terminal: d.terminal ?? null, indexStatus: r.status, tip: d.tip, address: r.address, value: String(d.value),
+    // Basic ledger metadata: present whenever state is indexed; null when state is unindexed
+    sold: s?.sold != null ? Number(s.sold) : null,
+    purchaseCount: s?.purchaseCount != null ? Number(s.purchaseCount) : null,
+    ticketPrice: s?.config?.ticketPrice != null ? String(s.config.ticketPrice) : null,
+    ticketCap: s?.config?.ticketCap != null ? Number(s.config.ticketCap) : null,
+    minTickets: s?.config?.minTickets != null ? Number(s.config.minTickets) : null,
     latestTxid: d.latestTxid ?? null, accepting: d.accepting ?? null, utxoDaa: d.utxoDaa == null ? null : String(d.utxoDaa),
     updatedAt: r.updatedAt, liveSeenAt: r.liveSeenAt, ...(acc ?? {}), ...(store ? {tipSpentSeenAt: spentAt} : {}),
-    ...(detail ? {state: d.state, purchases: d.purchases, origin: d.origin, scriptPublicKey: d.spk} : {})};
+    ...(s ? {state: s} : {}),
+    ...(detail ? {purchases: d.purchases, origin: d.origin, scriptPublicKey: d.spk} : {})};
 }
 export function createApi({
   store,
