@@ -276,14 +276,17 @@ export async function handleAdmin(req, res, ctx) {
     }
 
     // Universal TXID Tracer & Catch-Up (Accepts ANY stage: Genesis, BUY, CLOSE, REFUND, DRAW)
+    // Honours ?network= so a mainnet TXID is resolved with the mainnet store/engine/REST, never the primary view.
     if (sub === '/track' && req.method === 'POST') {
       try {
+        const view = pickView(url.searchParams.get('network'));
+        if (!view) { send(400, {ok: false, error: 'UNKNOWN_NETWORK', networks: viewKeys}); return true; }
         const body = await readBody(req).catch(() => ({}));
         const txid = body?.txid?.trim();
-        const restUrl = engine?.config?.restUrl;
+        const restUrl = view.engine?.config?.restUrl;
         const result = await traceAndTrackTxid(txid, {
-          store,
-          engine,
+          store: view.store,
+          engine: view.engine,
           restUrl,
           now: () => Date.now()
         });
