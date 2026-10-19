@@ -86,9 +86,19 @@ export function createApi({
     const url = new URL(req.url, 'http://localhost');
 
     // Public status endpoints (aliased to status handler, completely open & unauthenticated)
-    if (url.pathname === '/status' || url.pathname === '/v1/status') {
+    // Accepts /status, /v1/status, and network-prefixed /<network>/status, /<network>/v1/status.
+    const statusMatch = /^(?:\/([a-z0-9_-]+))?\/(?:v1\/)?status$/.exec(url.pathname);
+    if (statusMatch) {
+      const netKeys = new Set((networks ?? []).map(v => v.key));
+      const pfx = statusMatch[1];
+      if (pfx !== undefined && networks && !netKeys.has(pfx)) {
+        send(400, {detail: 'UNKNOWN_NETWORK', networks: [...netKeys]});
+        return;
+      }
+      const statusQuery = new URLSearchParams(url.search);
+      if (pfx !== undefined && !statusQuery.has('network')) statusQuery.set('network', pfx);
       try {
-        const handled = await handleAdmin(Object.assign(Object.create(req), {url: '/admin/api/status' + url.search}), res, {
+        const handled = await handleAdmin(Object.assign(Object.create(req), {url: '/admin/api/status' + (statusQuery.toString() ? '?' + statusQuery : '')}), res, {
           store, engine, contracts, node, sdk, network, networks, adminToken, contractsPath, openMember, log
         });
         if (handled) return;
@@ -123,12 +133,45 @@ export function createApi({
       const primaryKey = netList[0]?.key ?? 'tn10';
       const availableKeys = [...new Set(netList.map(v => v.key))];
 
-      // Public Networks Catalog Discovery: GET /v1/networks
-      if (url.pathname === '/v1/networks') {
+      // Multi-network routing. Accepted forms (all equivalent):
+      //   /<network>/rounds...           (network-first, v1 implied)
+      //   /<network>/v1/rounds...        (network-first prefix)
+      //   /v1/<network>/rounds...        (legacy, kept for compatibility)
+      //   /v1/rounds?network=<network>   (query parameter)
+      let pathname = url.pathname;
+      let pathNetwork = null;
+      let prefixMatched = false;
+      const netKeyRe = '[a-z0-9_-]+';
+      let m;
+      if ((m = new RegExp(`^/(${netKeyRe})/v1/(networks|rounds(?:/[0-9a-f]{64})?)$`).exec(pathname)) && views.has(m[1])) {
+        pathNetwork = m[1]; pathname = '/v1/' + m[2]; prefixMatched = true;
+      } else if ((m = new RegExp(`^/(${netKeyRe})/(networks|rounds(?:/[0-9a-f]{64})?)$`).exec(pathname)) && views.has(m[1])) {
+        pathNetwork = m[1]; pathname = '/v1/' + m[2]; prefixMatched = true;
+      } else if ((m = new RegExp(`^/v1/(${netKeyRe})/(rounds(?:/[0-9a-f]{64})?)$`).exec(pathname)) && views.has(m[1])) {
+        pathNetwork = m[1]; pathname = '/v1/' + m[2]; prefixMatched = true;
+      }
+
+      const requested = pathNetwork || url.searchParams.get('network');
+      if (requested !== null && !views.has(requested)) {
+        return send(400, {detail: 'UNKNOWN_NETWORK', networks: availableKeys});
+      }
+      // A network-first path prefix naming an unknown network is a 400, not a bare 404.
+      // Only consider real network-first shapes: /<key>/... where <key> is not a reserved route ('v1', 'admin').
+      if (pathNetwork === null && !prefixMatched) {
+        const pfx = new RegExp(`^/([a-z0-9_-]+)/(v1/)?(rounds|networks|status)(?:$|[/?])`).exec(pathname);
+        if (pfx && pfx[1] !== 'v1' && pfx[1] !== 'admin') {
+          return send(400, {detail: 'UNKNOWN_NETWORK', networks: availableKeys});
+        }
+      }
+
+      // Public Networks Catalog Discovery: GET /v1/networks (also /<network>/networks)
+      if (pathname === '/v1/networks') {
+        const only = pathNetwork !== null ? views.get(pathNetwork) : null;
+        const list = only ? [only] : netList;
         return send(200, {
           ok: true,
           defaultNetwork: primaryKey,
-          networks: netList.map(v => ({
+          networks: list.map(v => ({
             key: v.key,
             label: v.label ?? null,
             networkId: v.networkId ?? v.key,
@@ -143,19 +186,6 @@ export function createApi({
         });
       }
 
-      // Multi-network routing: support both query parameter ?network=<key> and path prefix /v1/<network>/rounds...
-      let pathname = url.pathname;
-      let pathNetwork = null;
-      const pathNetMatch = /^\/v1\/([a-z0-9_-]+)\/(rounds(?:\/[0-9a-f]{64})?)$/.exec(pathname);
-      if (pathNetMatch && views.has(pathNetMatch[1])) {
-        pathNetwork = pathNetMatch[1];
-        pathname = '/v1/' + pathNetMatch[2];
-      }
-
-      const requested = pathNetwork || url.searchParams.get('network');
-      if (requested !== null && !views.has(requested)) {
-        return send(400, {detail: 'UNKNOWN_NETWORK', networks: availableKeys});
-      }
 
       const v = requested !== null ? views.get(requested) : netList[0];
       const vStore = v.store, vEngine = v.engine, vContracts = v.contracts, vNode = v.node;
