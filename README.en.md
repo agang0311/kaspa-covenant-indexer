@@ -2,9 +2,13 @@
 
 [English](./README.en.md) | [简体中文](./README.md)
 
-Standalone stateful covenant event indexer, CID REST service, and Admin Studio for **Kaspa Testnet 10**, **SilverScript**, and **Argent** covenants.
+Standalone stateful covenant event indexer, CID REST service, and Admin Studio.
 
-This service tracks on-chain UTXO events, resolves spenders, validates selected-chain transaction acceptance, enforces multi-version contract transition rules (defaulting to **Kaswin V2.0.2** `ed0387c9`, with backward compatibility for **V2.0.1** `78c11314`, **V2** `7aaf76fe` / `206d4ec7`, **F3.2** `7ca61d81`, and **F3** `1dc41809` terminal rounds), and provides:
+A single process monitors both **Kaspa Mainnet** and **Testnet 10 (TN10)** — two hot-standby nodes per network —
+providing generic lifecycle indexing for state covenants written in **SilverScript** / **Argent**.
+
+Only **Kaswin V2.0.2** (Profile `ed0387c9`) ships as a built-in contract plugin; the plugin architecture accepts any
+custom covenant DApp. This service provides:
 - 🔍 **Open & Public REST Service**: Low-latency, CID-keyed REST endpoints completely open and unauthenticated for front-end DApps, explorers, and bots.
 - 🖥️ **Web Admin Studio (`/admin`)**: Embedded dark-themed management dashboard featuring real-time node latency probing, node health diagnosis, Universal TXID Tracer, SilverScript compiler workbench, and contract plugin hot-toggling.
 - 🛡️ **Role-Based Security**: Query and diagnostic APIs require zero authentication; only state-mutating management operations require the admin password (`ADMIN_TOKEN`).
@@ -84,14 +88,31 @@ Settings can be customized via `.env` environment variables or CLI flags:
 
 | Environment Variable | CLI Option | Description | Default |
 |---|---|---|---|
-| `KASWIN_NODE_URL` | `--url` | Single fixed wRPC node URL (Borsh) | Empty (uses pool) |
-| `KASWIN_NODE_URLS` | `--urls` | Comma-separated dual-node URLs | Empty |
-| `KASWIN_REST_URL` / `KASPA_REST_URL` | `--rest-url` | Official REST accelerator probe URL (`none` or `off` to disable) | `https://api-tn10.kaspa.org` |
-| `ADMIN_TOKEN` | `--admin-token` | Web admin authentication token (auto-generated in SQLite if omitted) | Auto-generated |
-| `KASWIN_REGISTRY_ADDRESSES` | `--registry-addresses` | Watched Kaswin Registry address list | Official TN10 Registry |
-| `KASWIN_CORS_ORIGIN` | `--cors-origin` | Allowed CORS origin (`*`, URL, or `none`) | `*` (open by default) |
+| — | `--networks` | Comma-separated networks to monitor | `tn10` |
+| `KASWIN_NODE_URL` | `--url` | Single fixed wRPC node URL | Empty (uses pool) |
+| `KASWIN_NODE_URLS` | `--urls` | Comma-separated dual-node URLs (single network only) | Empty |
+| — | `--pool` | Enable pool speed-testing and primary/standby election | Off |
+| `KASWIN_REST_URL` / `KASPA_REST_URL` | `--rest-url` | Official REST accelerator probe URL (`none` / `off` to disable) | Each network's own REST |
+| `ADMIN_TOKEN` | `--admin-token` | Admin Studio token (auto-generated in SQLite if omitted) | Auto-generated |
+| `KASWIN_REGISTRY_ADDRESSES` | `--registry-addresses` | Override watched Registry address list | Each network's default |
+| `KASWIN_CORS_ORIGIN` | `--cors-origin` | Allowed CORS origin (`*`, URL, or `none`) | `*` |
 | `KASWIN_API_PORT` | `--api-port` | REST API listening port | `8788` |
 | `KASWIN_API_HOST` | `--api-host` | REST API listening host | `0.0.0.0` |
+
+### Multi-network example
+
+```bash
+# One process for mainnet + TN10, dual hot-standby nodes per network
+node indexer.mjs run \
+  --networks tn10,mainnet \
+  --contracts contracts/v202.json \
+  --db /var/lib/kaswin-event-indexer/events.sqlite \
+  --pool \
+  --api-host 127.0.0.1 --api-port 8788
+```
+
+Each network gets its own SQLite database (`<db>.<key>.sqlite`) bound via `meta.network`. Reusing one file across
+networks throws `NETWORK_MISMATCH_DB`, because the same x-only key yields the **same** scriptPublicKey on both networks.
 
 ---
 
@@ -113,23 +134,45 @@ Under Kaspa GHOSTDAG, the indexer avoids expensive unbounded block scans. When a
 
 ## REST API Reference
 
-The service serves read-only JSON endpoints on port `8788` (**100% open and unauthenticated for all query operations**, CORS-friendly):
+The service serves read-only JSON endpoints on port `8788` (**100% open and unauthenticated for all query operations**,
+CORS-friendly with `Access-Control-Allow-Origin: *`).
+
+### 0. Multi-network addressing (three equivalent forms)
+
+One instance serves both networks. Pick any form:
+
+| Form | Example |
+|---|---|
+| **Network-first prefix (recommended)** | `/tn10/rounds`, `/mainnet/rounds`, `/tn10/v1/rounds` |
+| Legacy path prefix | `/v1/tn10/rounds`, `/v1/mainnet/rounds` |
+| Query parameter | `/v1/rounds?network=tn10` |
+
+Network keys are `tn10` / `mainnet`; the network ID (`testnet-10`) is also accepted.
+An unknown prefix returns `400 {"detail":"UNKNOWN_NETWORK","networks":[...]}`.
+Omitting the network uses the primary view (first entry of `--networks`).
 
 ### 1. Covenant Rounds Query
-- `GET /v1/rounds`: List indexed rounds (supports keyset pagination via `?limit=50` and `?cursor=<cid>`).
-- `GET /v1/rounds?status=open`: Filter rounds in active/open purchasing phase.
-- `GET /v1/rounds?status=sealed`: Filter rounds in sealed/pending settlement phase.
-- `GET /v1/rounds?status=close`: Filter completed or refunded terminal rounds.
-- `GET /v1/rounds/{cid}`: Fetch detailed round state, history, and purchase records by its 64-character lowercase hex Covenant ID.
+- `GET /{net}/rounds`: List indexed rounds with `?limit=` (max 200) and `?cursor=<cid>` keyset pagination.
+- **Server-side filters**:
+  - `?status=open|sealed|close|unknown` — by category.
+  - `?phase=1|2|5` — by state-machine phase (1 open / 2 sealed / 5 refunding).
+  - `?terminal=true|false` — completed only / in-progress only.
+- `GET /{net}/rounds/{cid}`: Fetch a round by its 64-char hex CID **or by its Genesis TXID**.
+  List rows carry lightweight ledger fields (`sold` / `purchaseCount` / `ticketCap` / `minTickets` / `ticketPrice` / `state`);
+  the full `purchases` directory is returned only in the detail view.
 
-### 2. Service & Node Status (Unauthenticated)
+### 2. Network Catalog
+- `GET /v1/networks`: Full catalog (key / networkId / genesis / registry / rounds / live / activeNode).
+- `GET /{net}/networks`: Only that network's catalog entry.
+
+### 3. Service & Node Status (Unauthenticated)
 - `GET /status` or `GET /v1/status`: Retrieve indexer version, active consensus node, DAA score, round counts, and active contract plugins.
 - `GET /admin/api/status`: Admin overview metrics and journal mirrors.
 - `GET /admin/api/plugins`: List of loaded contract plugins and profile digests.
 - `GET /admin/api/node-pool`: Node pool health matrix and dual-node topology.
 - `POST /admin/api/probe-rest`: Official REST zero-trust accelerator handshake diagnosis.
 
-### 3. Universal TXID Tracer (Unauthenticated)
+### 4. Universal TXID Tracer (Unauthenticated)
 - `POST /admin/api/track`: Submit a transaction ID from any stage to trace backwards, extract CID, deduplicate, and automatically catch up:
   ```bash
   curl -s -X POST -H "Content-Type: application/json" \
@@ -137,7 +180,7 @@ The service serves read-only JSON endpoints on port `8788` (**100% open and unau
     http://localhost:8788/admin/api/track
   ```
 
-### 4. Admin Management Operations (Requires Password)
+### 5. Admin Management Operations (Requires Password)
 - `POST /admin/api/recheck-discoveries`: Re-evaluate previously unmatched genesis tasks and trigger auto-catchup.
 - `POST /admin/api/plugins/toggle`: Enable or retire contract plugins.
 - `POST /admin/api/plugins/update-config`: Update plugin invariant guards and watched addresses.
@@ -173,19 +216,24 @@ If you wish to adapt this indexer for your own Kaspa Covenant DApp (e.g., AMM, a
 
 ---
 
-## Release Notes
+---
 
-### v0.1.2 (2026-10-16) - Zero-SDK Pure-JS Architecture Milestone
-- 🚀 **Complete Removal of WASM SDK**: Eliminated the 12MB official C++/WASM binary (`kaspa_bg.wasm`), achieving 100% pure native JavaScript execution.
-- 💎 **Pure-JS CashAddr / Bech32 Codecs (`src/address.mjs`)**: Implemented native Kaspa address and `ScriptPublicKey` codecs, strictly verified against official SDK outputs for both P2PK (v0) and P2SH (v8) covenant addresses.
-- 🌐 **Native WebSocket wRPC JSON Client (`src/rpc.mjs`)**: Directly connects to Kaspa nodes via standard `/wrpc/json` protocol with request tracking and native `VirtualChainChanged` / `UtxosChanged` event subscriptions, eliminating Borsh binary overhead.
-- 📉 **Resident Memory Cut by Over 50%**: Slashed daemon RSS from ~80MB down to ~28MB–38MB, removing cross-process WASM native memory leak risks.
-- 🛡️ **Intelligent Node Pool & Backend Isolation**: Implemented concurrent RTT latency probing, lag exclusion, strict physical backend isolation (`p2pId`), and dynamic standby failover and replacement.
-- 🧪 **Full Test Regression Passed**: 131 unit and integration test fixtures passed (121 pass, 10 skipped, 0 fail), with 0 markdown broken links.
+## Documentation Index
 
-### v0.1.1 (2026-10-15) - Kaswin V2.0.2 Upgrade & REST Zero-Trust Hint Oracle
-- Upgraded active default covenant profile to **Kaswin V2.0.2** (`ed0387c9` 80B KW21 named layout).
-- Introduced official REST zero-trust hint accelerator forming a 4-tier sub-second spender locator funnel.
-- Added Universal TXID Tracer (`/admin/api/track`) and Web Admin Studio diagnostic dashboard.
-- Self-contained packaging eliminating external monorepo dependencies.
+| Document | Contents |
+|---|---|
+| [README.md](./README.md) / [README.en.md](./README.en.md) | Current capabilities, deployment, API |
+| [CHANGELOG.md](./CHANGELOG.md) | Version history |
+| [CUSTOM_DAPP_GUIDE.md](./CUSTOM_DAPP_GUIDE.md) | Plugin authoring guide for custom covenant DApps |
+| [docs/MULTI-NETWORK-PREFLIGHT.md](./docs/MULTI-NETWORK-PREFLIGHT.md) | Multi-network design constraints and acceptance boundaries |
+| [docs/INDEXER-CODE-REVIEW-20261017.md](./docs/INDEXER-CODE-REVIEW-20261017.md) | Code review record (2026-10-17) |
 
+---
+
+## Contract Version
+
+**This project supports Kaswin V2.0.2 (Profile `ed0387c9`) only.**
+
+The V2 / V2.0.1 / F3 / F3.2 plugin modules and `artifacts/` were removed on 2026-10-16.
+Rounds created by those versions remain in the database as history but classify as `unknown` in the API
+(fail-closed), since their plugins no longer exist. See [CHANGELOG.md](./CHANGELOG.md#历史版本清理说明).

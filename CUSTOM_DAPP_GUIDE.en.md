@@ -145,18 +145,20 @@ export async function create(options = {}, { sdk }) {
 
 ---
 
-### Step 2: Register in Contract Config (`contracts/default.json`)
+### Step 2: Register in Contract Config
 
-Configure `contracts/default.json` to load your new module:
+Create your own config file (e.g. `contracts/my-dapp.json`) and pass it via `--contracts`.
+See the built-in `contracts/v202.json` for reference:
 
 ```json
 {
   "contracts": [
     {
       "module": "my-dapp.mjs",
+      "sha256": "<optional SHA-256 of your module file, recommended>",
       "retired": false,
       "options": {
-        "profileId": "7ca61d81be1a2448d16b18cb2bdce845c91ed4993a6da0fd26b14d211fbce863",
+        "profileId": "<your covenant Profile ID>",
         "watchAddresses": [
           "kaspatest:your_factory_or_registry_address"
         ]
@@ -166,7 +168,20 @@ Configure `contracts/default.json` to load your new module:
 }
 ```
 
-> **Smooth Upgrades & Multi-Version Support**: When deploying a V2 contract in the future, simply add V2 to the config and mark V1 as `"retired": true`. The indexer will discover new rounds using V2 while **continuing to validate all existing V1 rounds until they terminate**.
+Then start with:
+
+```bash
+node indexer.mjs run --contracts contracts/my-dapp.json ...
+```
+
+> **Version isolation**: One Profile maps to exactly one core library and template set;
+> `assertCompatibleProfile` rejects any cross-Profile call.
+> To upgrade a contract, **add** a new entry rather than editing the old one — existing rounds still need
+> their original rules to reach terminal state. Set `"retired": true` to stop discovering new instances
+> while loaded rounds keep being tracked.
+>
+> ⚠️ **Kaswin V2 / V2.0.1 / F3 / F3.2 are no longer bundled.** Those modules and their `artifacts/` were removed
+> on 2026-10-16; rounds they created now classify as `unknown`.
 
 ---
 

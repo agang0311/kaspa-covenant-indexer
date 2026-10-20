@@ -145,18 +145,20 @@ export async function create(options = {}, { sdk }) {
 
 ---
 
-### 第二步：在配置文件中注册插件 (`contracts/default.json`)
+### 第二步：在配置文件中注册插件
 
-修改 `contracts/default.json`，启用你的插件：
+创建你自己的配置文件（例如 `contracts/my-dapp.json`），并传给 `--contracts`。
+参考内置的 `contracts/v202.json`：
 
 ```json
 {
   "contracts": [
     {
       "module": "my-dapp.mjs",
+      "sha256": "<你的模块文件 SHA-256，可选但推荐>",
       "retired": false,
       "options": {
-        "profileId": "7ca61d81be1a2448d16b18cb2bdce845c91ed4993a6da0fd26b14d211fbce863",
+        "profileId": "<你的契约 Profile ID>",
         "watchAddresses": [
           "kaspatest:你的工厂或注册表地址"
         ]
@@ -166,7 +168,18 @@ export async function create(options = {}, { sdk }) {
 }
 ```
 
-> **平滑升级与多版本并存**：如果你以后发布了 V2 合约，只需在配置中新增 V2 并将 V1 设为 `"retired": true`。Indexer 会自动使用 V2 发现新实例，同时**继续使用 V1 规则跟踪和推进所有历史 V1 实例直至终局**。
+启动时指定：
+
+```bash
+node indexer.mjs run --contracts contracts/my-dapp.json ...
+```
+
+> **版本隔离**：一个 Profile 只对应一套核心库与模板，`assertCompatibleProfile` 会拒绝任何跨 Profile 的调用。
+> 若你要升级合约，请**新增**一个条目而不是原地修改旧条目——旧轮次仍需用旧规则推进到终局；
+> 完全停用旧版本时，将其 `retired` 置为 `true`（已加载的旧轮次会继续被跟踪，但不再发现新实例）。
+>
+> ⚠️ **本项目已不再内置 Kaswin V2 / V2.0.1 / F3 / F3.2**。那些模块与 `artifacts/` 已于 2026-10-16 删除，
+> 数据库中由它们创建的轮次现在统一归类为 `unknown`。
 
 ---
 

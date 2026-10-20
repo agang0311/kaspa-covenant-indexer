@@ -3,9 +3,12 @@
 [English](./README.en.md) | [简体中文](./README.md)
 
 Kaspa 状态契约（Stateful Covenant）通用事件索引器、CID REST 服务与 Admin 管理控制台的独立自包含发布版本。
-全面支持 **Kaspa Testnet 10 (TN10)**、**SilverScript** 与 **Argent** 契约生命周期管理。
 
-本项目用于监听链上事件、定位花费者、验证选定链 acceptance、核验多版本契约状态机规则（内置 **Kaswin V2.0.2** `ed0387c9` 主契约，兼容 **V2.0.1** `78c11314`、**V2** `7aaf76fe` / `206d4ec7`、**F3.2** `7ca61d81` 与 **F3** `1dc41809`），并提供：
+单一进程同时监控 **Kaspa Mainnet** 与 **Testnet 10 (TN10)** 两条网络（每网双节点热备），
+面向 **SilverScript** / **Argent** 编写的状态契约提供通用生命周期索引能力。
+
+当前仅内置 **Kaswin V2.0.2**（Profile `ed0387c9`）一个契约插件；插件化架构允许接入任意自定义 Covenant DApp。
+本项目提供：
 - 🔍 **全开放免密 REST API**：所有查询接口（`/v1/rounds`、`/status`、`/admin/api/status`、`/admin/api/track` 等）**100% 免密开放**，供各类前端 DApp / 监控高并发调用；
 - 🖥️ **Web 控制台 (`/admin`)**：内置现代化暗黑管理面板，支持实时节点连通性测速、节点健康体检、通用交易全链路追溯、SilverScript 在线编译工坊与契约插件热载；
 - 🛡️ **管理操作安全隔离**：链上无私钥、不签名、不广播；仅修改配置、启停插件、安装卸载等**核心管理动作**才需要管理员密码；
@@ -85,14 +88,31 @@ systemctl restart kaswin-indexer.service  # 重启服务
 
 | 环境变量 | CLI 参数 | 说明 | 默认值 |
 |---|---|---|---|
+| — | `--networks` | 监控的网络列表（逗号分隔） | `tn10` |
 | `KASWIN_NODE_URL` | `--url` | 固定单 wRPC 节点地址 | 留空（使用节点池） |
-| `KASWIN_NODE_URLS` | `--urls` | 逗号分隔的双节点地址 | 留空 |
-| `KASWIN_REST_URL` / `KASPA_REST_URL` | `--rest-url` | 官方 REST 定位加速探针 URL（填 `none` 或 `off` 禁用） | `https://api-tn10.kaspa.org` |
-| `ADMIN_TOKEN` | `--admin-token` | Web 管理后台认证令牌（不设置则自动生成并持久化在 SQLite 中） | 自动生成 |
-| `KASWIN_REGISTRY_ADDRESSES` | `--registry-addresses` | 监听的 Registry 地址列表 | 官方 TN10 Registry |
-| `KASWIN_CORS_ORIGIN` | `--cors-origin` | 跨域来源（`*`、具体域名或 `none` 禁用） | `*`（默认允许跨域） |
+| `KASWIN_NODE_URLS` | `--urls` | 逗号分隔的双节点地址（仅单网络） | 留空 |
+| — | `--pool` | 启用节点池自动测速与主备选举 | 关闭 |
+| `KASWIN_REST_URL` / `KASPA_REST_URL` | `--rest-url` | 官方 REST 定位加速探针 URL（`none` / `off` 禁用） | 各网络自己的 REST |
+| `ADMIN_TOKEN` | `--admin-token` | Admin 控制台令牌（不设置则自动生成并持久化在 SQLite） | 自动生成 |
+| `KASWIN_REGISTRY_ADDRESSES` | `--registry-addresses` | 覆盖监听的 Registry 地址列表 | 各网络默认 Registry |
+| `KASWIN_CORS_ORIGIN` | `--cors-origin` | 跨域来源（`*`、具体域名或 `none` 禁用） | `*` |
 | `KASWIN_API_PORT` | `--api-port` | REST API 端口 | `8788` |
 | `KASWIN_API_HOST` | `--api-host` | REST API 监听地址 | `0.0.0.0` |
+
+### 多网络示例
+
+```bash
+# 单进程同时监控主网与 TN10，每网双节点热备
+node indexer.mjs run \
+  --networks tn10,mainnet \
+  --contracts contracts/v202.json \
+  --db /var/lib/kaswin-event-indexer/events.sqlite \
+  --pool \
+  --api-host 127.0.0.1 --api-port 8788
+```
+
+每个网络使用独立的 SQLite 数据库（`<db>.<key>.sqlite`），通过 `meta.network` 绑定，
+跨网络复用同一文件会抛 `NETWORK_MISMATCH_DB`（因为同一 x-only 公钥在两条网络生成**相同**的 SPK）。
 
 ---
 
@@ -114,23 +134,44 @@ systemctl restart kaswin-indexer.service  # 重启服务
 
 ## REST API 接口说明
 
-服务默认运行在 `8788` 端口，**所有查询类接口 100% 开放免密（CORS 友好）**：
+服务默认运行在 `8788` 端口，**所有查询类接口 100% 开放免密（CORS 友好，`Access-Control-Allow-Origin: *`）**。
+
+### 0. 多网络寻址（三种写法等价）
+
+同一实例同时服务两条网络，任选一种：
+
+| 写法 | 示例 |
+|---|---|
+| **网络优先前缀（推荐）** | `/tn10/rounds`、`/mainnet/rounds`、`/tn10/v1/rounds` |
+| 旧版路径前缀 | `/v1/tn10/rounds`、`/v1/mainnet/rounds` |
+| Query 参数 | `/v1/rounds?network=tn10` |
+
+网络标识既可用 `tn10` / `mainnet`，也可用 `testnet-10`。
+未知网络前缀返回 `400 {"detail":"UNKNOWN_NETWORK","networks":[...]}`。
+不指定网络时使用主视图（`--networks` 的第一个）。
 
 ### 1. 契约轮次查询
-- `GET /v1/rounds`：获取已索引轮次列表（支持 `?limit=50`、`?cursor=<cid>` 分页）。
-- `GET /v1/rounds?status=open`：筛选进行中轮次。
-- `GET /v1/rounds?status=sealed`：筛选已封存/待结算轮次。
-- `GET /v1/rounds?status=close`：筛选已完结/终局轮次。
-- `GET /v1/rounds/{cid}`：根据 64 位十六进制 Covenant ID 查询轮次详情。
+- `GET /{net}/rounds`：已索引轮次列表，支持 `?limit=`（上限 200）、`?cursor=<cid>` 游标分页。
+- **服务端过滤**：
+  - `?status=open|sealed|close|unknown`：按分类筛选。
+  - `?phase=1|2|5`：按状态机阶段筛选（1 售票中 / 2 已封盘 / 5 退款中）。
+  - `?terminal=true|false`：只看已终局 / 只看进行中。
+- `GET /{net}/rounds/{cid}`：按 64 位十六进制 CID **或创世 TXID** 查询轮次详情。
+  列表视图返回轻量账本字段（`sold` / `purchaseCount` / `ticketCap` / `minTickets` / `ticketPrice` / `state`）；
+  `purchases` 完整购买目录仅详情视图返回。
 
-### 2. 索引器与节点状态查询（免密）
+### 2. 网络目录
+- `GET /v1/networks`：全部网络目录（key / networkId / genesis / registry / rounds / live / activeNode）。
+- `GET /{net}/networks`：仅该网络的目录条目。
+
+### 3. 索引器与节点状态查询（免密）
 - `GET /status` 或 `GET /v1/status`：获取当前索引器版本、主连接节点、选定链 DAA、收录轮次统计及当前活动契约插件。
 - `GET /admin/api/status`：管理看板运行指标与审计流水镜像。
 - `GET /admin/api/plugins`：已加载的全部契约插件列表与规则指纹。
 - `GET /admin/api/node-pool`：候选节点池与双节点热备当前健康拓扑。
 - `POST /admin/api/probe-rest`：官方 REST 零信任加速探针在线握手诊断。
 
-### 3. 通用交易全链路追溯器 (Universal Tracer, 免密)
+### 4. 通用交易全链路追溯器 (Universal Tracer, 免密)
 - `POST /admin/api/track`：输入任意阶段的交易哈希，自动反向回溯至创世、提取 CID、与本地数据库比对去重；若为未收录轮次则自动提交索引器进行全生命周期追块：
   ```bash
   # 请求体
@@ -139,7 +180,7 @@ systemctl restart kaswin-indexer.service  # 重启服务
     http://localhost:8788/admin/api/track
   ```
 
-### 4. 核心管理变更操作 (需管理员密码验证)
+### 5. 核心管理变更操作 (需管理员密码验证)
 - `POST /admin/api/recheck-discoveries`：重审所有被忽略的历史创世任务并触发索引器全自动追块。
 - `POST /admin/api/plugins/toggle`：启用或停用指定契约插件。
 - `POST /admin/api/plugins/update-config`：更新插件创世守门断言、监听地址与不变量。
@@ -175,19 +216,24 @@ node indexer.mjs run --db events.sqlite --pool --api-port 8788
 
 ---
 
-## 版本发布记录 (Release Notes)
+---
 
-### v0.1.2 (2026-10-16) - Zero-SDK 纯 JavaScript 架构重大演进
-- 🚀 **全面移除 WASM SDK 依赖**：彻底剔除 12MB 的官方 C++/WASM SDK 二进制文件（`kaspa_bg.wasm`），实现 100% 纯 JavaScript 原生运行；
-- 💎 **原生 CashAddr / Bech32 编解码 (`src/address.mjs`)**：内置纯 JS Kaspa 地址与 `ScriptPublicKey` 双向编解码器，针对 P2PK (v0) 与 P2SH (v8) 契约地址与官方 SDK 输出保持 100% 双向一致；
-- 🌐 **原生 WebSocket wRPC JSON 客户端 (`src/rpc.mjs`)**：直接连通 Kaspa 节点官方 `/wrpc/json` 标准协议，支持 RPC 请求追踪与 `VirtualChainChanged` / `UtxosChanged` 原生事件订阅，免除 Borsh 序列化包袱；
-- 📉 **常驻内存骤降超 50%**：运行内存由改造前的 ~80MB 骤降至 ~28MB-38MB RSS，根除 WASM 跨进程内存泄露隐患；
-- 🛡️ **智能节点池自动竞速与后端隔离**：支持并发测量 RTT 往返延迟、自动剔除滞后节点，依据 `p2pId` 强制进行物理节点后端隔离，提供主备双节点自愈换血能力；
-- 🧪 **全量回归验证**：131 项单元测试与集成测试（121 pass, 10 skipped, 0 fail）与全量 Markdown 文档链接 100% 验证通过。
+## 文档索引
 
-### v0.1.1 (2026-10-15) - Kaswin V2.0.2 升级与官方 REST 零信任加速
-- 升级默认主契约为 **Kaswin V2.0.2**（`ed0387c9` 80B KW21 规范命名布局）；
-- 引入官方 REST 零信任加速探针，形成 4 级亚秒级花费者与创世定位漏斗；
-- 通用任意阶段交易回溯器 (`/admin/api/track`) 与 Web Admin 诊断看板；
-- 完备的自包含封装，消除对外部仓库的路径依赖。
+| 文档 | 内容 |
+|---|---|
+| [README.md](./README.md) / [README.en.md](./README.en.md) | 当前能力、部署与 API |
+| [CHANGELOG.md](./CHANGELOG.md) | 版本变更历史 |
+| [CUSTOM_DAPP_GUIDE.md](./CUSTOM_DAPP_GUIDE.md) | 接入自定义 Covenant DApp 的插件编写指南 |
+| [docs/MULTI-NETWORK-PREFLIGHT.md](./docs/MULTI-NETWORK-PREFLIGHT.md) | 多网络改造的设计约束与验收边界 |
+| [docs/INDEXER-CODE-REVIEW-20261017.md](./docs/INDEXER-CODE-REVIEW-20261017.md) | 2026-10-17 代码审查记录 |
 
+---
+
+## 合约版本说明
+
+**本项目仅支持 Kaswin V2.0.2（Profile `ed0387c9`）。**
+
+V2 / V2.0.1 / F3 / F3.2 的插件模块与 `artifacts/` 产物已于 2026-10-16 全部删除。
+数据库中由旧版本创建的轮次保留为历史记录，但因插件不存在，API 中统一归类为 `unknown`（fail-closed）。
+详见 [CHANGELOG.md](./CHANGELOG.md#历史版本清理说明)。
