@@ -141,13 +141,21 @@ impl Plugin {
     pub fn is_rolling(&self) -> bool {
         matches!(self.rules, ContractRules::RollingV1(_))
     }
+    /// Option keys this plugin actually reads; the admin page only offers these for editing.
+    pub fn configurable(&self) -> Vec<&'static str> {
+        if self.is_rolling() {
+            vec!["registryAddresses"]
+        } else {
+            vec!["registryAddresses", "registrationSompi", "requiredDeposit", "allowedCreators", "initialStateGuards"]
+        }
+    }
     pub fn describe(&self) -> Value {
         json!({
             "key": self.key, "profileId": self.profile_id(), "retired": self.retired, "module": self.module,
             "moduleSha256": Value::Null, "native": true,
             "network": self.rules.network().key, "networkGenesis": self.rules.network().genesis,
             "watchAddresses": self.watch_addresses(), "config": self.rules.config(),
-            "configurable": ["registryAddresses", "registrationSompi", "requiredDeposit", "allowedCreators", "initialStateGuards"],
+            "configurable": self.configurable(),
         })
     }
 }

@@ -275,6 +275,13 @@ async fn dispatch(api: &Arc<Api>, req: Request) -> Result<Response> {
     Ok(response(404, json!({"detail":"NOT_FOUND"})))
 }
 pub fn category(r: &RoundRow) -> &'static str {
+    if r
+        .contract
+        .as_deref()
+        .is_some_and(|s| s.starts_with("rolling-v1@"))
+    {
+        return rolling_category(r);
+    }
     if r.status == "STALE"
         || !r
             .contract
@@ -290,6 +297,22 @@ pub fn category(r: &RoundRow) -> &'static str {
         Some(1) => "open",
         Some(2) => "sealed",
         Some(5) => "close",
+        _ => "unknown",
+    }
+}
+/// Rolling v1: a non-null `terminal` closes the round; otherwise the manager module gives the phase.
+/// `refund` is grouped with `close`, matching how V2.0.2 groups its refunding phase.
+fn rolling_category(r: &RoundRow) -> &'static str {
+    if r.status == "STALE" || r.status == "ROLLED_BACK" {
+        return "unknown";
+    }
+    if r.status == "TERMINAL" || !r.data["terminal"].is_null() {
+        return "close";
+    }
+    match r.data["module"].as_str() {
+        Some("sales") => "open",
+        Some("sealed" | "win" | "frozen") => "sealed",
+        Some("refund") => "close",
         _ => "unknown",
     }
 }

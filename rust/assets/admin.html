@@ -644,6 +644,7 @@ input:focus, select:focus, textarea:focus {
     <button class="tab-btn active" data-tab="tab-overview">📊 运行概览</button>
     <button class="tab-btn" data-tab="tab-nodes">🛰️ 节点热备池</button>
     <button class="tab-btn" data-tab="tab-plugins">🧩 契约插件管理</button>
+    <button class="tab-btn" data-tab="tab-rolling">🎲 Rolling 轮次</button>
     <button class="tab-btn" data-tab="tab-compiler">🛠️ SilverScript 编译工坊</button>
     <button class="tab-btn" data-tab="tab-journal">📜 审计流水</button>
   </nav>
@@ -883,13 +884,84 @@ input:focus, select:focus, textarea:focus {
     </div>
   </section>
 
+  <!-- TAB: Rolling v1 轮次浏览（只读，固定 TN10） -->
+  <section id="tab-rolling" class="view-panel">
+    <div class="section-head">
+      <div>
+        <div class="section-title">
+          🎲 Rolling 轮次浏览 (Rolling Rounds)
+          <span class="tag tag-active mono" style="font-size:11px;margin-left:6px;">TN10</span>
+          <span id="rollingProfileStatus" class="tag tag-warn mono" style="font-size:11px;margin-left:4px;">-</span>
+        </div>
+        <div class="section-desc">
+          索引器观察到的 Rolling 轮次、分片与历史转换（只读，固定 TN10，不随上方网络切换）。这里展示的是观察视图，不是付款凭证；交易 acceptance 与 live UTXO 应由客户端向节点自行核验。
+        </div>
+      </div>
+      <button class="btn btn-sm" id="btnReloadRolling">🔄 刷新</button>
+    </div>
+
+    <div class="grid-cards">
+      <div class="card">
+        <div class="card-label"><span>收录轮次</span><span>ROUNDS</span></div>
+        <div class="card-val" id="rollingRoundsCount">-</div>
+        <div class="card-sub" id="rollingRevision">revision: -</div>
+      </div>
+      <div class="card">
+        <div class="card-label"><span>索引游标</span><span>CURSOR</span></div>
+        <div class="card-val mono" id="rollingCursorDaa" style="font-size:18px;">-</div>
+        <div class="card-sub mono" id="rollingCursorBlock" style="word-break:break-all;">-</div>
+      </div>
+      <div class="card">
+        <div class="card-label"><span>Profile</span><span>PINNED</span></div>
+        <div class="card-sub mono" id="rollingProfileId" style="word-break:break-all;font-size:12px;">-</div>
+        <div class="card-sub" id="rollingStale">-</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:16px;">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <input type="text" id="inputRollingSearch" class="mono" style="flex:1;min-width:240px;height:36px;" placeholder="输入 Rolling 轮次 CID 或任一已收录转换的 TXID...">
+        <button class="btn btn-pri" id="btnRollingSearch" style="white-space:nowrap;height:36px;">🔍 查询</button>
+      </div>
+    </div>
+
+    <div id="rollingDetail" style="display:none;margin-bottom:16px;"></div>
+
+    <div class="card" style="padding:0;overflow:hidden;margin-bottom:16px;">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>轮次 CID</th>
+              <th>模块</th>
+              <th>终局</th>
+              <th>票数</th>
+              <th>购买</th>
+              <th>分片</th>
+              <th>Manager 余额</th>
+              <th>接受 DAA</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="tblRollingRounds">
+            <tr><td colspan="9" style="text-align:center;color:var(--muted);">切换到本页后加载...</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div style="padding:10px 14px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+        <span id="rollingListInfo" style="color:var(--muted);font-size:12px;">-</span>
+        <button class="btn btn-sm" id="btnRollingMore" style="display:none;">加载更多</button>
+      </div>
+    </div>
+  </section>
+
   <!-- TAB 4: SilverScript 编译工坊 (纯编译与产物生成) -->
   <section id="tab-compiler" class="view-panel">
     <div class="section-head">
       <div>
         <div class="section-title">🛠️ SilverScript 在线编译器 (SilverScript Studio)</div>
         <div class="section-desc">
-          在线编写、语法分析并编译 SilverScript 契约，查看字节码、模板哈希与 Artifact。索引器仅支持 Kaswin V2.0.2；编译产物不会自动安装或部署。
+          在线编写、语法分析并编译 SilverScript 契约，查看字节码、模板哈希与 Artifact。编译产物不会自动安装或部署；索引器的原生契约插件需编译进二进制。
         </div>
       </div>
     </div>
@@ -1004,7 +1076,7 @@ input:focus, select:focus, textarea:focus {
           <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:2px;">监听的注册表地址 (逗号分隔):</label>
           <input type="text" id="cfgRegistryAddr" class="mono" style="font-size:11.5px;" placeholder="kaspatest:qz... (留空需手动 track 创世)">
         </div>
-        <div>
+        <div id="cfgRegSompiWrap">
           <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:2px;">创世登记费 (sompi, 0为不限):</label>
           <input type="text" id="cfgRegSompi" class="mono" style="font-size:11.5px;" value="5000000" placeholder="5000000 (0.05 TKAS)">
         </div>
@@ -1012,7 +1084,7 @@ input:focus, select:focus, textarea:focus {
     </div>
 
     <!-- 2. 合法创世状态与参数守门断言 -->
-    <div style="background:var(--bg-panel-elevated);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:14px;">
+    <div id="cfgGuardsSection" style="background:var(--bg-panel-elevated);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:14px;">
       <div style="font-weight:700;font-size:12px;color:var(--emerald);margin-bottom:6px;">
         🛡️ 合法创世守门断言 (Genesis State Invariants & Guards)
       </div>
@@ -1038,6 +1110,8 @@ input:focus, select:focus, textarea:focus {
         </div>
       </div>
     </div>
+
+    <div id="cfgInertNote" class="card-sub" style="display:none;margin:-4px 0 12px;color:var(--muted);font-size:11.5px;"></div>
 
     <!-- 底部按钮 -->
     <div style="display:flex;gap:10px;width:100%;box-sizing:border-box;">
@@ -1190,7 +1264,12 @@ async function refreshAll() {
 
     document.getElementById('statRoundsTotal').innerText = data.rounds?.total ?? 0;
     document.getElementById('statRoundsBreakdown').innerText = 
-      '活跃进行中: ' + (data.rounds?.live ?? 0) + ' · 终局完成: ' + (data.rounds?.byStatus?.close ?? 0);
+      '活跃进行中: ' + (data.rounds?.live ?? 0) + ' · 终局完成: ' + (data.rounds?.byStatus?.close ?? 0) +
+      (() => {
+        const byC = data.rounds?.byContract || {};
+        const n = Object.keys(byC).filter(k => k.startsWith('rolling-v1@')).reduce((s, k) => s + (byC[k] || 0), 0);
+        return n ? (' · 其中 Rolling: ' + n) : '';
+      })();
 
     document.getElementById('statVirtualDaa').innerText = data.activeNode?.virtualDaaScore || data.checkpoint?.virtualDaa || '-';
     document.getElementById('statCheckpointTime').innerText = 
@@ -1806,7 +1885,9 @@ async function loadPluginsTab() {
     const cfgList = res.config || [];
 
     tbody.innerHTML = cfgList.map((cfg, idx) => {
-      const p = list[idx] || {};
+      // Match by module: plugins only lists what is loaded for THIS network, so indices can differ from the config list.
+      const p = list.find(x => x.module === cfg.module || x.module === './' + cfg.module) || {};
+      const loadedHere = Boolean(p.key);
       const watchAddrs = p.config?.registryAddresses || p.watchAddresses || cfg.options?.registryAddresses || [];
       const regCount = watchAddrs.length;
       let watchText = '<span style="color:var(--dim);">无监听</span>';
@@ -1824,7 +1905,7 @@ async function loadPluginsTab() {
         '<td class="mono" style="white-space:nowrap;">' + (cfg.module || '-') + '</td>' +
         '<td class="mono" style="font-size:12px;color:var(--muted);word-break:break-all;overflow-wrap:anywhere;">' + (p.profileId ? renderHash(p.profileId, 'Profile ID') : '-') + '</td>' +
         '<td style="white-space:nowrap;">' + watchText + '</td>' +
-        '<td style="white-space:nowrap;">' + (cfg.retired ? '<span class="tag tag-retired">RETIRED (兼容)</span>' : '<span class="tag tag-active">ACTIVE (主导)</span>') + '</td>' +
+        '<td style="white-space:nowrap;">' + (!loadedHere ? '<span class="tag tag-retired" title="该插件未在当前网络加载' + (Array.isArray(cfg.networks) ? ' (仅 ' + cfg.networks.join(', ') + ')' : '') + '">本网络未加载</span>' : cfg.retired ? '<span class="tag tag-retired">RETIRED (兼容)</span>' : '<span class="tag tag-active">ACTIVE (主导)</span>') + '</td>' +
         '<td>' +
           '<div style="display:flex;gap:4px;flex-wrap:nowrap;align-items:center;">' +
             '<button class="btn btn-sm btn-pri" style="padding:2px 7px;font-size:11px;white-space:nowrap;" onclick="openPluginConfigModal(' + idx + ')">⚙️ 配置</button>' +
@@ -1868,6 +1949,19 @@ window.openPluginConfigModal = function(idx) {
   const eff = p.config || {};
   const configurable = Array.isArray(p.configurable) ? p.configurable : null;
   const inert = k => configurable && !configurable.includes(k);
+  window._currentConfigurable = configurable;
+  // Only offer the options this plugin actually reads (e.g. Rolling only uses registryAddresses).
+  const regSompiWrap = document.getElementById('cfgRegSompiWrap');
+  if (regSompiWrap) regSompiWrap.style.display = inert('registrationSompi') ? 'none' : '';
+  const guardsSection = document.getElementById('cfgGuardsSection');
+  const guardKeys = ['requiredDeposit', 'allowedCreators', 'initialStateGuards'];
+  if (guardsSection) guardsSection.style.display = guardKeys.every(inert) ? 'none' : '';
+  const inertNote = document.getElementById('cfgInertNote');
+  if (inertNote) {
+    const hidden = ['registrationSompi', ...guardKeys].filter(inert);
+    inertNote.style.display = hidden.length ? 'block' : 'none';
+    inertNote.innerText = hidden.length ? ('该插件不读取以下选项，已隐藏且不会提交: ' + hidden.join(', ') + '。合约规则由编译进二进制的原生插件固定。') : '';
+  }
 
   document.getElementById('cfgModalPluginKey').innerText = p.key || (opts.id + '@' + (opts.version || '1.0.0'));
   document.getElementById('cfgActiveToggle').checked = !cfg.retired;
@@ -2013,16 +2107,21 @@ document.getElementById('btnSavePluginConfig').onclick = async function() {
   btn.innerText = '正在保存配置并热生效...';
 
   try {
+    const allOptions = {
+      registryAddresses,
+      registrationSompi,
+      requiredDeposit,
+      allowedCreators,
+      initialStateGuards
+    };
+    const configurable = window._currentConfigurable;
+    const options = Array.isArray(configurable)
+      ? Object.fromEntries(Object.entries(allOptions).filter(([k]) => configurable.includes(k)))
+      : allOptions;
     const res = await api('/plugins/update-config', 'POST', {
       index: idx,
       retired,
-      options: {
-        registryAddresses,
-        registrationSompi,
-        requiredDeposit,
-        allowedCreators,
-        initialStateGuards
-      }
+      options
     });
 
     if (res.ok) {
@@ -2308,6 +2407,268 @@ if (btnAst) btnAst.onclick = () => runCompilation(true);
 const btnComp = document.getElementById('btnCompileSil');
 if (btnComp) btnComp.onclick = () => runCompilation(false);
 
+// 5. Rolling v1 rounds (read-only public endpoints, TN10 fixed; independent of the network switcher)
+const rollingBase = apiPrefix.slice(0, apiPrefix.length - '/admin/api'.length) + '/tn10';
+let rollingCursor = null;
+let rollingRows = [];
+let rollingDetailCid = null;
+let rollingHistoryNext = null;
+
+function escHtml(v) {
+  return String(v ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+}
+const isHex64 = s => /^[0-9a-f]{64}$/.test(String(s || ''));
+// Amounts stay decimal strings / BigInt; never Number.
+function fmtSompi(v) {
+  if (v === null || v === undefined || v === '') return '-';
+  const s = String(v);
+  if (!/^\d+$/.test(s)) return escHtml(s);
+  const b = BigInt(s);
+  const unit = BigInt(100000000);
+  const frac = (b % unit).toString().padStart(8, '0').replace(/0+$/, '');
+  return (b / unit).toString() + (frac ? '.' + frac : '') + ' TKAS';
+}
+function daaKey(v) {
+  try { return BigInt(String(v ?? '0')); } catch { return BigInt(0); }
+}
+function shortHex(h) {
+  const s = String(h || '');
+  return s.length > 22 ? s.slice(0, 10) + '…' + s.slice(-8) : s;
+}
+function hexCell(h, label) {
+  if (!isHex64(h)) return escHtml(h ?? '-');
+  return '<span class="mono" style="cursor:pointer;" title="' + h + ' (点击复制)" onclick="copyHash(\'' + h + '\', \'' + escHtml(label) + '\')">' + shortHex(h) + ' 📋</span>';
+}
+function fmtAny(v) {
+  if (v === null || v === undefined || v === '') return '-';
+  if (typeof v === 'string') return isHex64(v) ? hexCell(v, '哈希') : escHtml(v);
+  if (typeof v === 'object' && isHex64(v.transactionId)) return hexCell(v.transactionId, 'TXID') + '<span class="mono">:' + escHtml(v.index) + '</span>';
+  if (typeof v === 'object') return '<span class="mono" style="font-size:11px;word-break:break-all;">' + escHtml(JSON.stringify(v)) + '</span>';
+  return escHtml(v);
+}
+const ROLLING_MODULE_LABEL = { sales: '售票中', sealed: '已封盘', win: '开奖/派奖', refund: '退款', frozen: '冻结分片' };
+function rollingModuleTag(m) {
+  if (!m) return '-';
+  const cls = m === 'sales' ? 'tag-active' : (m === 'refund' ? 'tag-warn' : 'tag-standby');
+  return '<span class="tag ' + cls + ' mono" style="font-size:11px;">' + escHtml(m) + (ROLLING_MODULE_LABEL[m] ? ' · ' + ROLLING_MODULE_LABEL[m] : '') + '</span>';
+}
+function rollingTerminalTag(t) {
+  if (!t) return '<span class="tag tag-active" style="font-size:11px;">进行中</span>';
+  const cls = t === 'PAID' ? 'tag-active' : (t === 'REFUNDED' ? 'tag-warn' : 'tag-retired');
+  return '<span class="tag ' + cls + ' mono" style="font-size:11px;">' + escHtml(t) + '</span>';
+}
+
+async function rollingGet(path) {
+  const res = await fetch(rollingBase + path, { headers: { 'Accept': 'application/json' } });
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || ('HTTP ' + res.status));
+  }
+  return res.json();
+}
+
+async function loadRollingTab(reset) {
+  try {
+    const info = await rollingGet('/info');
+    const tbody = document.getElementById('tblRollingRounds');
+    if (!info) {
+      document.getElementById('rollingProfileStatus').innerText = '未加载';
+      tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--muted);">当前实例未加载 Rolling 插件（或未监控 TN10）</td></tr>';
+      document.getElementById('btnRollingMore').style.display = 'none';
+      document.getElementById('rollingListInfo').innerText = '-';
+      return;
+    }
+    document.getElementById('rollingProfileStatus').innerText = info.status || '-';
+    document.getElementById('rollingRoundsCount').innerText = info.roundsCount ?? '-';
+    document.getElementById('rollingRevision').innerText = 'revision: ' + (info.revision ?? '-');
+    document.getElementById('rollingCursorDaa').innerText = info.cursor?.daa || '-';
+    document.getElementById('rollingCursorBlock').innerText = info.cursor?.blockHash || '-';
+    document.getElementById('rollingProfileId').innerHTML = hexCell(info.profileId, 'Rolling Profile ID');
+    document.getElementById('rollingStale').innerText =
+      '网络: ' + (info.network || '-') + ' · 只读: ' + (info.readOnly ? '是' : '否') + ' · stale: ' + (info.stale ? '是' : '否');
+    if (reset) { rollingCursor = null; rollingRows = []; }
+    await loadRollingPage();
+    if (reset && rollingDetailCid) await openRollingRound(rollingDetailCid, true);
+  } catch (err) {
+    showToast('Rolling 数据加载失败: ' + err.message, 'var(--rose)');
+  }
+}
+
+async function loadRollingPage() {
+  const res = await rollingGet('/rounds?limit=100' + (rollingCursor ? '&cursor=' + encodeURIComponent(rollingCursor) : ''));
+  rollingRows = rollingRows.concat(res?.rounds || []);
+  rollingCursor = res?.nextCursor || null;
+  renderRollingRows();
+}
+
+function renderRollingRows() {
+  const tbody = document.getElementById('tblRollingRounds');
+  // Newest accepted first. The API pages by CID, so ordering covers the rows loaded so far.
+  const rows = rollingRows.slice().sort((a, b) => {
+    const x = daaKey(a.acceptingDaa), y = daaKey(b.acceptingDaa);
+    return x === y ? 0 : (x < y ? 1 : -1);
+  });
+  tbody.innerHTML = rows.length ? rows.map(r =>
+    '<tr>' +
+      '<td>' + hexCell(r.cid, '轮次 CID') + '</td>' +
+      '<td style="white-space:nowrap;">' + rollingModuleTag(r.module) + '</td>' +
+      '<td style="white-space:nowrap;">' + rollingTerminalTag(r.terminal) + '</td>' +
+      '<td class="mono">' + escHtml(r.tickets ?? '-') + '</td>' +
+      '<td class="mono">' + escHtml(r.buys ?? '-') + '</td>' +
+      '<td class="mono">' + escHtml(r.shards ?? '-') + '</td>' +
+      '<td class="mono" style="white-space:nowrap;">' + fmtSompi(r.managerValue) + '</td>' +
+      '<td class="mono">' + escHtml(r.acceptingDaa ?? '-') + '</td>' +
+      '<td>' + (isHex64(r.cid) ? '<button class="btn btn-sm" style="padding:2px 7px;font-size:11px;" onclick="openRollingRound(\'' + r.cid + '\')">详情</button>' : '') + '</td>' +
+    '</tr>').join('')
+    : '<tr><td colspan="9" style="text-align:center;color:var(--muted);">暂无 Rolling 轮次</td></tr>';
+  document.getElementById('rollingListInfo').innerText = '已加载 ' + rows.length + ' 轮' + (rollingCursor ? '，还有更多' : '');
+  document.getElementById('btnRollingMore').style.display = rollingCursor ? '' : 'none';
+}
+
+function rollingField(label, val) {
+  return '<div class="journal-field"><span class="journal-field-label">' + escHtml(label) + ':</span><span class="journal-field-val">' + val + '</span></div>';
+}
+
+window.openRollingRound = async function(cid, quiet) {
+  if (!isHex64(cid)) return;
+  const box = document.getElementById('rollingDetail');
+  try {
+    const d = await rollingGet('/rounds/' + cid);
+    if (!d) {
+      if (!quiet) showToast('未找到该 Rolling 轮次', 'var(--amber)');
+      return;
+    }
+    rollingDetailCid = cid;
+    const s = d.summary || {};
+    const m = d.manager || {};
+    const h = d.head || {};
+    const frozen = Array.isArray(d.frozen) ? d.frozen : [];
+    box.style.display = 'block';
+    box.innerHTML =
+      '<div class="card" style="border-left:4px solid var(--kaspa);">' +
+        '<div class="card-label" style="margin-bottom:10px;">' +
+          '<span style="color:var(--kaspa);">🎲 轮次详情 ' + rollingModuleTag(s.module) + ' ' + rollingTerminalTag(d.terminal) + ' <span class="tag tag-warn mono" style="font-size:11px;">' + escHtml(d.status || '-') + '</span></span>' +
+          '<span style="display:flex;gap:6px;">' +
+            '<button class="btn btn-sm" onclick="exportRollingRound(\'' + cid + '\')">⬇️ 导出核验数据</button>' +
+            '<button class="btn btn-sm" onclick="closeRollingDetail()">✕</button>' +
+          '</span>' +
+        '</div>' +
+        '<div class="grid-2col" style="margin-bottom:8px;">' +
+          '<div>' +
+            rollingField('轮次 CID', hexCell(cid, '轮次 CID')) +
+            rollingField('创世 Origin', fmtAny(d.origin)) +
+            rollingField('revision', escHtml(d.revision ?? '-')) +
+            rollingField('单票价格', fmtSompi(s.ticketPrice)) +
+            rollingField('票数 / 上限 / 最低', escHtml((s.tickets ?? '-') + ' / ' + (s.ticketCap ?? '-') + ' / ' + (s.minTickets ?? '-'))) +
+            rollingField('购买次数 / 已购票', escHtml((s.buys ?? '-') + ' / ' + (s.bought ?? '-'))) +
+            rollingField('封盘可执行 DAA', escHtml(s.closeEligibleDaa ?? '-')) +
+            rollingField('step', escHtml(s.step ?? '-')) +
+            rollingField('累计手续费', fmtSompi(s.fees)) +
+          '</div>' +
+          '<div>' +
+            rollingField('Manager Outpoint', fmtAny(m.outpoint)) +
+            rollingField('Manager 余额', fmtSompi(m.value)) +
+            rollingField('Manager UTXO DAA', escHtml(m.utxoDaa ?? '-')) +
+            rollingField('分片 / 本地记录 / 冻结', escHtml((s.shards ?? '-') + ' / ' + (s.localRecords ?? '-') + ' / ' + (s.frozenCount ?? frozen.length))) +
+            rollingField('中奖 Key', fmtAny(s.winnerKey)) +
+            rollingField('派奖游标', escHtml(s.payCursor ?? '-')) +
+            rollingField('退款分片 / 游标', escHtml((s.refundShard ?? '-') + ' / ' + (s.refundCursor ?? '-'))) +
+            rollingField('最新 TXID', fmtAny(h.txid)) +
+            rollingField('接受块 / DAA', fmtAny(h.acceptingBlock) + ' <span class="mono">@ ' + escHtml(h.acceptingDaa ?? '-') + '</span>') +
+          '</div>' +
+        '</div>' +
+        (frozen.length ? '<details style="margin-bottom:8px;"><summary style="cursor:pointer;color:var(--muted);font-size:12px;">冻结分片 (' + frozen.length + ')</summary>' +
+          '<pre class="mono" style="font-size:11px;white-space:pre-wrap;word-break:break-all;max-height:240px;overflow:auto;">' + escHtml(JSON.stringify(frozen, null, 2)) + '</pre></details>' : '') +
+        '<div style="font-weight:700;font-size:12px;margin:8px 0 6px;">📜 历史转换</div>' +
+        '<div class="table-wrap"><table><thead><tr><th>#</th><th>类型</th><th>动作</th><th>TXID</th><th>接受块</th><th>接受 DAA</th><th>状态</th><th>观察时间</th></tr></thead>' +
+          '<tbody id="tblRollingHistory"><tr><td colspan="8" style="text-align:center;color:var(--muted);">加载中...</td></tr></tbody></table></div>' +
+        '<div style="display:flex;justify-content:flex-end;margin-top:8px;"><button class="btn btn-sm" id="btnRollingHistoryMore" style="display:none;" onclick="loadRollingHistory(false)">加载更多历史</button></div>' +
+      '</div>';
+    rollingHistoryNext = null;
+    await loadRollingHistory(true);
+    if (!quiet) box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (err) {
+    showToast('轮次详情加载失败: ' + err.message, 'var(--rose)');
+  }
+};
+
+window.loadRollingHistory = async function(reset) {
+  const cid = rollingDetailCid;
+  if (!isHex64(cid)) return;
+  const tbody = document.getElementById('tblRollingHistory');
+  try {
+    const offset = reset ? null : rollingHistoryNext;
+    const res = await rollingGet('/rounds/' + cid + '/history?limit=50' + (offset ? '&cursor=' + encodeURIComponent(offset) : ''));
+    if (cid !== rollingDetailCid || !tbody) return;
+    const events = res?.events || [];
+    const html = events.map(ev =>
+      '<tr>' +
+        '<td class="mono">' + escHtml(ev.revision ?? '-') + '</td>' +
+        '<td>' + (ev.type === 'ROLLBACK' ? '<span class="tag tag-rose" style="font-size:11px;">ROLLBACK</span>' : '<span class="tag tag-active" style="font-size:11px;">ACCEPT</span>') + '</td>' +
+        '<td class="mono">' + escHtml(ev.action ?? '-') + '</td>' +
+        '<td>' + fmtAny(ev.txid) + '</td>' +
+        '<td>' + fmtAny(ev.position?.acceptingBlockHash) + '</td>' +
+        '<td class="mono">' + escHtml(ev.position?.acceptingDaa ?? '-') + '</td>' +
+        '<td class="mono">' + escHtml(ev.status ?? '-') + '</td>' +
+        '<td style="white-space:nowrap;font-size:11.5px;">' + (ev.observedAt ? escHtml(new Date(ev.observedAt).toLocaleString()) : '-') + '</td>' +
+      '</tr>').join('');
+    if (reset) tbody.innerHTML = html || '<tr><td colspan="8" style="text-align:center;color:var(--muted);">暂无转换记录</td></tr>';
+    else tbody.insertAdjacentHTML('beforeend', html);
+    rollingHistoryNext = res?.nextCursor || null;
+    const more = document.getElementById('btnRollingHistoryMore');
+    if (more) more.style.display = rollingHistoryNext ? '' : 'none';
+  } catch (err) {
+    showToast('历史加载失败: ' + err.message, 'var(--rose)');
+  }
+};
+
+window.exportRollingRound = async function(cid) {
+  if (!isHex64(cid)) return;
+  try {
+    const res = await fetch(rollingBase + '/rounds/' + cid + '/export', { headers: { 'Accept': 'application/json' } });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    // Keep the server bytes as-is (amounts are strings; no JSON re-serialisation).
+    const blob = new Blob([await res.text()], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'rolling-' + cid.slice(0, 16) + '.json';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  } catch (err) {
+    showToast('导出失败: ' + err.message, 'var(--rose)');
+  }
+};
+
+window.closeRollingDetail = function() {
+  rollingDetailCid = null;
+  const box = document.getElementById('rollingDetail');
+  box.style.display = 'none';
+  box.innerHTML = '';
+};
+
+async function searchRolling() {
+  const q = document.getElementById('inputRollingSearch').value.trim().toLowerCase();
+  if (!isHex64(q)) {
+    showToast('请输入 64 位十六进制 CID 或 TXID', 'var(--amber)');
+    return;
+  }
+  try {
+    if (await rollingGet('/rounds/' + q)) return openRollingRound(q);
+    const hit = await rollingGet('/txid/' + q);
+    if (hit && isHex64(hit.cid)) return openRollingRound(hit.cid);
+    showToast('未找到对应的 Rolling 轮次（仅支持已收录的 CID / 转换 TXID）', 'var(--amber)');
+  } catch (err) {
+    showToast('查询失败: ' + err.message, 'var(--rose)');
+  }
+}
+
+document.getElementById('btnReloadRolling').onclick = () => loadRollingTab(true);
+document.getElementById('btnRollingMore').onclick = () => loadRollingPage().catch(err => showToast('加载失败: ' + err.message, 'var(--rose)'));
+document.getElementById('btnRollingSearch').onclick = searchRolling;
+document.getElementById('inputRollingSearch').addEventListener('keydown', e => { if (e.key === 'Enter') searchRolling(); });
+
 // Tabs Switcher
 document.querySelectorAll('.tab-btn').forEach(btn => {
   btn.onclick = () => {
@@ -2316,6 +2677,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.classList.add('active');
     document.getElementById(btn.dataset.tab).classList.add('active');
     if (btn.dataset.tab === 'tab-plugins') loadPluginsTab();
+    if (btn.dataset.tab === 'tab-rolling') loadRollingTab(true);
     if (btn.dataset.tab === 'tab-nodes') {
       loadManagedPool();
       if (!window._poolLoaded) { window._poolLoaded = true; loadNodePoolBenchmark(); }
@@ -2362,6 +2724,7 @@ document.getElementById('btnRefresh').onclick = async () => {
   await refreshAll();
   const activeTab = document.querySelector('.view-panel.active')?.id;
   if (activeTab === 'tab-plugins') await loadPluginsTab();
+  else if (activeTab === 'tab-rolling') await loadRollingTab(true);
   else if (activeTab === 'tab-nodes') await loadNodePoolBenchmark();
   showToast('已刷新最新状态');
 };

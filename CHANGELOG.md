@@ -12,7 +12,11 @@ README 只描述**当前**能力与用法；历史变更一律记录在此。
 ### Added
 - 原生 Rust 实现 [`rust/`](rust/README.md)：V2.0.2 规则、wRPC JSON、双节点、独立网络数据库、事件引擎、REST/Admin、SilverScript 编译和历史回放/差分工具。运行时不依赖 Node.js 或 Kaspa SDK。
 - 本机（`kci-rust-lab.service`）与 jp / la 两台 VPS（`kci.service`，musl 静态二进制）已切换到 Rust，均监听 8788，
-  原 JS 服务停用但保留；其余 JS 部署未改动。仅原生 V2.0.2 可执行，不安装 JavaScript 插件。
+  原 JS 服务停用但保留；其余 JS 部署未改动。仅内置原生契约插件可执行，不安装 JavaScript 插件。
+- 原生 `rolling-v1` 插件（仅 `tn10`，UNVALIDATED，固定 5 套合约工件 [`artifacts/rolling-v1/`](artifacts/rolling-v1/)）与简化只读接口
+  `/tn10/info`、`/tn10/rounds`（列表、详情、`/history`、`/export`）及 `/tn10/txid/<txid>`；支持多 UTXO 分片、顺序批量追块与回滚。
+- Admin 控制台新增「🎲 Rolling 轮次」只读标签页（固定 TN10，调用 `/tn10/{info,rounds,txid}`），支持按 CID / TXID 查询、
+  查看账本摘要 / Manager outpoint / 冻结分片 / 分页转换历史与导出原始 JSON；金额均使用 `BigInt` 与十进制字符串处理。
 - Rust：剪枝点以下的花费恢复（[`rust/src/pruned.rs`](rust/src/pruned.rs)）。tip 的花费交易接受于节点剪枝点之下时，
   从 REST 取交易内容，仅在以下条件全部满足时提交：
   - 本地按 rusty-kaspa 规则重算 txid 一致（REST 不提供 lockTime / sequence / gas，只尝试少量候选值并要求精确匹配）；
@@ -40,8 +44,12 @@ README 只描述**当前**能力与用法；历史变更一律记录在此。
 - `checkFinality()` 不再因单个已剪枝区块头而中断整轮巡检；超过 1 小时的剪枝记录直接归档为 `FINAL`。
 - `reconcile()` 巡检范围扩大到 `LIVE` + `STALE` 的活动轮次，`STALE` 轮次可在链上 Tip 已花费时自愈。
 - Admin UI 所有 TXID / 区块哈希完整显示，并支持点击复制。
+- 概览状态分类 `category()` 支持 `rolling-v1@*` 轮次（`sales`→`open`、`sealed`/`win`/`frozen`→`sealed`、`refund` 或已终局→`close`、`STALE`/`ROLLED_BACK`→`unknown`），概览卡片同步显示 Rolling 轮次计数。
+- 插件配置元数据按插件类型返回 `configurable`（`rolling-v1` 仅开放 `registryAddresses`），Admin 配置弹窗隐藏并跳过提交未开放选项。
 
 ### Fixed
+- **Admin 插件列表错位**：改为按 `module` 匹配运行时插件状态，而非数组下标；未在当前网络加载的插件（如主网视图下的 `rolling-v1`）
+  显示「本网络未加载」，不再误标为 `ACTIVE`。
 - **Rust 主网轮次卡在已剪枝区块头**：`resolve_spend` 先读取 tip 创建区块的区块头。标准 10 BPS 主网节点只保留约
   32 小时，超过该时长未花费的 tip 返回 `cannot find header`，每轮巡检报错。3 个主网轮次（CID `7e48d62a…`、
   `183de5b5…`、`5e1f79a3…`）因此停在 2026-10-30 的花费之前，现已通过上述恢复追平。
