@@ -1,0 +1,26 @@
+[Unit]
+Description=Kaspa covenant indexer Rust (read-only chain)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=kaswin-index
+Group=kaswin-index
+WorkingDirectory=/opt/kci-rust-lab
+ExecStart=/opt/kci-rust-lab/bin/kci run --networks tn10,mainnet --db /var/lib/kci-rust-lab/events.sqlite --contracts /var/lib/kci-rust-lab/contracts.json --api-host 127.0.0.1 --api-port 8788 --pool
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/kci-rust-lab
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+MemoryMax=768M
+TasksMax=64
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

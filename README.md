@@ -2,6 +2,8 @@
 
 [English](./README.en.md) | [简体中文](./README.md)
 
+**Rust 实现与本机部署：**见 [`rust/README.md`](rust/README.md)。原生 `kci` 支持 TN10/主网、V2.0.2 固定规则、REST 与 Admin Studio，使用独立数据库并已接管本机 8788 端口；本机原 JS 服务已停止并禁用开机启动。其鉴权、证据不足处理与 JavaScript 插件限制见该文档；下文 Docker/Node.js 部署仍指原 JS 实现。
+
 Kaspa 状态契约（Stateful Covenant）通用事件索引器、CID REST 服务与 Admin 管理控制台的独立自包含发布版本。
 
 单一进程同时监控 **Kaspa Mainnet** 与 **Testnet 10 (TN10)** 两条网络（每网双节点热备），

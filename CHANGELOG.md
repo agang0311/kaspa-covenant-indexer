@@ -10,6 +10,23 @@ README 只描述**当前**能力与用法；历史变更一律记录在此。
 ## [Unreleased]
 
 ### Added
+- 原生 Rust 实现 [`rust/`](rust/README.md)：V2.0.2 规则、wRPC JSON、双节点、独立网络数据库、事件引擎、REST/Admin、SilverScript 编译和历史回放/差分工具。运行时不依赖 Node.js 或 Kaspa SDK。
+- 本机（`kci-rust-lab.service`）与 jp / la 两台 VPS（`kci.service`，musl 静态二进制）已切换到 Rust，均监听 8788，
+  原 JS 服务停用但保留；其余 JS 部署未改动。仅原生 V2.0.2 可执行，不安装 JavaScript 插件。
+- Rust：剪枝点以下的花费恢复（[`rust/src/pruned.rs`](rust/src/pruned.rs)）。tip 的花费交易接受于节点剪枝点之下时，
+  从 REST 取交易内容，仅在以下条件全部满足时提交：
+  - 本地按 rusty-kaspa 规则重算 txid 一致（REST 不提供 lockTime / sequence / gas，只尝试少量候选值并要求精确匹配）；
+  - 资金输入金额来自已存储、或同样通过 txid 校验的前序交易；
+  - 节点仍能通过它的某个输出证明已接受并给出确切接受 DAA：该输出仍在 UTXO 集中，或被节点保留的子交易花费
+    （V2 `Full` 行输入的 `utxoEntry.blockDaaScore`）；
+  - 该 DAA 低于剪枝点 DAA，共识上不可逆，因此直接记为 `FINAL`。
+
+  签名脚本（v1 txid 不承诺）、接受块哈希与 blue score 仍来自 REST，由 `evidence.prunedRecovery` 与
+  `witnessSource=REST_COPY_TXID_MATCH` 标明。规则拒绝 REST 见证时延后为 `EVIDENCE_PRUNED`，不标 `STALE`。
+  只追溯一层后代：交易与其子交易都已剪枝、且没有存活输出时保持 `EVIDENCE_PRUNED`（最多每 5 分钟重试一次）。
+- Rust：live-tip 锚点。`reconcile()` 看到 tip 未花费时记录至少 30 秒前的 checkpoint；tip 的创建区块头被剪枝后，
+  花费搜索从该锚点开始。
+- Rust 的证据边界收紧：接受见证补全失败直接返回错误；缺失区块头不按记录年龄升级 FINAL；管理跟踪/重试请求需管理员令牌。这些差异只作用于 Rust，下述历史条目仍描述 JS 版本。
 - 网络优先路径前缀 `/tn10` 与 `/mainnet`：一个实例同时服务两条网络，无需 query 参数。
   - `/tn10/rounds`、`/mainnet/rounds`、`/tn10/v1/rounds`、`/tn10/networks`、`/tn10/status` 等。
   - 旧路径 `/v1/tn10/rounds`、`/v1/rounds?network=` 全部保留，向后兼容。
@@ -25,6 +42,9 @@ README 只描述**当前**能力与用法；历史变更一律记录在此。
 - Admin UI 所有 TXID / 区块哈希完整显示，并支持点击复制。
 
 ### Fixed
+- **Rust 主网轮次卡在已剪枝区块头**：`resolve_spend` 先读取 tip 创建区块的区块头。标准 10 BPS 主网节点只保留约
+  32 小时，超过该时长未花费的 tip 返回 `cannot find header`，每轮巡检报错。3 个主网轮次（CID `7e48d62a…`、
+  `183de5b5…`、`5e1f79a3…`）因此停在 2026-10-30 的花费之前，现已通过上述恢复追平。
 - **主网 Tracer 404**：`/admin/api/track` 忽略 `?network=`，始终使用主视图（TN10）的 REST，
   导致主网 TXID 查询恒返回 `HTTP 404`。现按网络选择 store / engine / restUrl。
 - **`SUCCESSOR_UTXO_MISMATCH`**：GHOSTDAG 下包含块 DAA ≤ 接受块 DAA，原代码用严格等值判定，
