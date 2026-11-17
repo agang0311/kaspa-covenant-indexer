@@ -2,14 +2,14 @@
 
 [English](./README.en.md) | [简体中文](./README.md)
 
-**Rust 实现与本机部署：**见 [`rust/README.md`](rust/README.md)。原生 `kci` 支持 TN10/主网、V2.0.2 固定规则、REST 与 Admin Studio，使用独立数据库并已接管本机 8788 端口；本机原 JS 服务已停止并禁用开机启动。其鉴权、证据不足处理与 JavaScript 插件限制见该文档；下文 Docker/Node.js 部署仍指原 JS 实现。
+**原生 Rust 实现：**见 [`rust/README.md`](rust/README.md)。`kci` 支持 TN10 和主网、REST API 与管理控制台，契约规则作为原生模块编译进二进制。下文 Docker/Node.js 部署和 API 说明适用于原 JavaScript 实现，Rust 版的接口、鉴权与插件机制以其文档为准。
 
 Kaspa 状态契约（Stateful Covenant）通用事件索引器、CID REST 服务与 Admin 管理控制台的独立自包含发布版本。
 
 单一进程同时监控 **Kaspa Mainnet** 与 **Testnet 10 (TN10)** 两条网络（每网双节点热备），
 面向 **SilverScript** / **Argent** 编写的状态契约提供通用生命周期索引能力。
 
-当前仅内置 **Kaswin V2.0.2**（Profile `ed0387c9`）一个契约插件；插件化架构允许接入任意自定义 Covenant DApp。
+项目通过契约插件适配不同 Covenant DApp；实际可用的规则和网络取决于所运行的实现及其配置。Rust 原生插件需编译进二进制，可通过管理接口查看已加载插件。
 本项目提供：
 - 🔍 **全开放免密 REST API**：所有查询接口（`/v1/rounds`、`/status`、`/admin/api/status`、`/admin/api/track` 等）**100% 免密开放**，供各类前端 DApp / 监控高并发调用；
 - 🖥️ **Web 控制台 (`/admin`)**：内置现代化暗黑管理面板，支持实时节点连通性测速、节点健康体检、通用交易全链路追溯、SilverScript 在线编译工坊与契约插件热载；
@@ -232,10 +232,6 @@ node indexer.mjs run --db events.sqlite --pool --api-port 8788
 
 ---
 
-## 合约版本说明
+## 契约插件
 
-**本项目仅支持 Kaswin V2.0.2（Profile `ed0387c9`）。**
-
-V2 / V2.0.1 / F3 / F3.2 的插件模块与 `artifacts/` 产物已于 2026-10-16 全部删除。
-数据库中由旧版本创建的轮次保留为历史记录，但因插件不存在，API 中统一归类为 `unknown`（fail-closed）。
-详见 [CHANGELOG.md](./CHANGELOG.md#历史版本清理说明)。
+契约规则、支持的网络和启用状态由具体实现与配置决定。Rust 版的原生插件随二进制编译，新增或更新规则需要重新编译；运行时可通过 `/admin/api/plugins` 查看已加载的插件及其规则指纹。历史变更见 [CHANGELOG.md](./CHANGELOG.md)。

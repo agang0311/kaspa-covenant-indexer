@@ -2,13 +2,12 @@
 
 [English](./README.en.md) | [简体中文](./README.md)
 
-Standalone stateful covenant event indexer, CID REST service, and Admin Studio.
+**Native Rust implementation:** See [`rust/README.md`](rust/README.md) for `kci`, its REST API, administration, and compiled-in native plugins. The Docker/Node.js deployment and API descriptions below apply to the original JavaScript implementation.
 
 A single process monitors both **Kaspa Mainnet** and **Testnet 10 (TN10)** — two hot-standby nodes per network —
 providing generic lifecycle indexing for state covenants written in **SilverScript** / **Argent**.
 
-Only **Kaswin V2.0.2** (Profile `ed0387c9`) ships as a built-in contract plugin; the plugin architecture accepts any
-custom covenant DApp. This service provides:
+Contract plugins adapt the indexer to covenant DApps; available rules and networks depend on the implementation and configuration. Rust native plugins are compiled into the binary, and loaded plugins can be inspected through the admin API. This service provides:
 - 🔍 **Open & Public REST Service**: Low-latency, CID-keyed REST endpoints completely open and unauthenticated for front-end DApps, explorers, and bots.
 - 🖥️ **Web Admin Studio (`/admin`)**: Embedded dark-themed management dashboard featuring real-time node latency probing, node health diagnosis, Universal TXID Tracer, SilverScript compiler workbench, and contract plugin hot-toggling.
 - 🛡️ **Role-Based Security**: Query and diagnostic APIs require zero authentication; only state-mutating management operations require the admin password (`ADMIN_TOKEN`).
@@ -230,10 +229,6 @@ If you wish to adapt this indexer for your own Kaspa Covenant DApp (e.g., AMM, a
 
 ---
 
-## Contract Version
+## Contract plugins
 
-**This project supports Kaswin V2.0.2 (Profile `ed0387c9`) only.**
-
-The V2 / V2.0.1 / F3 / F3.2 plugin modules and `artifacts/` were removed on 2026-10-16.
-Rounds created by those versions remain in the database as history but classify as `unknown` in the API
-(fail-closed), since their plugins no longer exist. See [CHANGELOG.md](./CHANGELOG.md#历史版本清理说明).
+Contract rules, supported networks, and enabled plugins depend on the implementation and configuration. Rust native plugins are compiled into the binary; adding or updating rules requires a rebuild. Use `/admin/api/plugins` to inspect loaded plugins and their rule fingerprints. See [CHANGELOG.md](./CHANGELOG.md) for historical changes.
