@@ -209,8 +209,8 @@ impl RollingV1 {
     pub fn create(options: &Value, network_name: Option<&str>) -> Result<Self> {
         let net_name = network_name.unwrap_or("tn10");
         let net = network_config(net_name)?;
-        if net.key != "tn10" {
-            bail!("ROLLING_V1_TN10_ONLY {net_name}");
+        if !matches!(net.key, "tn10" | "mainnet") {
+            bail!("ROLLING_V1_UNSUPPORTED_NETWORK {net_name}");
         }
         let profile = pinned_profile()?;
         if let Some(pid) = options.get("profileId").and_then(|v| v.as_str())
@@ -223,7 +223,7 @@ impl RollingV1 {
                 .iter()
                 .filter_map(|v| v.as_str().map(str::to_owned))
                 .collect(),
-            _ => vec![TN10_ROLLING_REGISTRY.to_string()],
+            _ => vec![net.registry.to_string()],
         };
         let scope = registry_scope(&addrs, net.key)?;
         let watch: Vec<String> = scope.iter().map(|s| s.address.clone()).collect();
@@ -513,11 +513,10 @@ impl RollingV1 {
             res.terminal.clone().map(|x| json!(x)).unwrap_or(Value::Null),
         );
 
-        let mut preimages = next
-            .get("preimages")
-            .and_then(|v| v.as_object())
-            .cloned()
-            .unwrap_or_default();
+        let mut preimages = match next.shift_remove("preimages") {
+            Some(Value::Object(m)) => m,
+            _ => serde_json::Map::new(),
+        };
         for (h, raw) in &res.frozen_outputs {
             preimages.insert(h.clone(), json!(hex(raw)));
         }
@@ -538,11 +537,10 @@ impl RollingV1 {
             next.insert("buys".into(), json!(buys + 1));
             next.insert("bought".into(), json!(bought + q as u64));
         }
-        let mut receipts = next
-            .get("receipts")
-            .and_then(|v| v.as_array())
-            .cloned()
-            .unwrap_or_default();
+        let mut receipts = match next.shift_remove("receipts") {
+            Some(Value::Array(a)) => a,
+            _ => Vec::new(),
+        };
         receipts.push(json!({
             "txid": txid_str,
             "action": res.action.as_str(),
@@ -595,8 +593,6 @@ impl RollingV1 {
                 );
             }
         }
-        next.insert("preimages".into(), Value::Object(preimages.clone()));
-
         if let Some(term) = &res.terminal
             && (term == "PAID" || term == "REFUNDED")
             && let Ok(prev_state) = identify(&manager.redeem_script, &self.profile)
@@ -641,6 +637,7 @@ impl RollingV1 {
                 }),
             );
         }
+        next.insert("preimages".into(), Value::Object(preimages));
 
         let mut frozen_list: Vec<Value> = next
             .get("frozen")
@@ -712,6 +709,14 @@ impl RollingV1 {
 
 /// Build `roundText` (tagged JSON compatible with `web/rolling-tn10/codec.mjs`) and `historicalShards`.
 pub fn export_round_text(d: &Value, virtual_daa: Option<&str>) -> Result<(String, Value)> {
+    export_round_text_for_network(d, virtual_daa, "testnet-10")
+}
+
+pub fn export_round_text_for_network(
+    d: &Value,
+    virtual_daa: Option<&str>,
+    network_id: &str,
+) -> Result<(String, Value)> {
     let cid = d.get("cid").and_then(|v| v.as_str()).unwrap_or("");
     let terminal = d.get("terminal").cloned().unwrap_or(Value::Null);
     let utxo_daa = d.get("utxoDaa").and_then(|v| v.as_str()).unwrap_or("0");
@@ -769,7 +774,7 @@ pub fn export_round_text(d: &Value, virtual_daa: Option<&str>) -> Result<(String
 
     let mut tagged = Map::new();
     tagged.insert("v".into(), json!(1));
-    tagged.insert("network".into(), json!("testnet-10"));
+    tagged.insert("network".into(), json!(network_id));
     tagged.insert("profileId".into(), json!(PROFILE_ID));
     tagged.insert("cid".into(), json!(cid));
     tagged.insert("origin".into(), d["origin"].clone());

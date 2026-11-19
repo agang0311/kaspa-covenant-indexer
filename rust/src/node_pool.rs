@@ -84,12 +84,20 @@ pub async fn probe_pool(urls: Vec<String>, probe: ProbeFn, max_lag: u64) -> Pool
         }
     }
     healthy.sort_by(|a, b| {
-        a.rtt_ms
-            .cmp(&b.rtt_ms)
+        is_local_url(&b.url)
+            .cmp(&is_local_url(&a.url))
+            .then(a.rtt_ms.cmp(&b.rtt_ms))
             .then(a.lag.cmp(&b.lag))
             .then(a.url.cmp(&b.url))
     });
     PoolResult { healthy, rejected }
+}
+
+pub fn is_local_url(url: &str) -> bool {
+    let lower = url.to_ascii_lowercase();
+    lower.starts_with("ws://127.0.0.1")
+        || lower.starts_with("ws://localhost")
+        || lower.starts_with("ws://[::1]")
 }
 
 /// [primary, standby], never two on the same backend; `exclude` = p2pIds to avoid.

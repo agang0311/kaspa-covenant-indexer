@@ -30,6 +30,52 @@ impl View {
     pub fn net(&self) -> &'static Network {
         self.engine.net
     }
+
+    /// Periodically switch back to a managed local node once it finishes syncing and catches up.
+    pub async fn reclaim_local_if_ready(&self) -> Result<()> {
+        let cur = self.engine.node.url();
+        if cur.as_deref().is_some_and(node_pool::is_local_url) {
+            return Ok(());
+        }
+        let locals: Vec<String> = self
+            .engine
+            .store
+            .db()
+            .pool_nodes()?
+            .iter()
+            .filter_map(|v| v["url"].as_str().map(str::to_owned))
+            .filter(|u| node_pool::is_local_url(u))
+            .collect();
+        if locals.is_empty() {
+            return Ok(());
+        }
+        let active_blue = u64::try_from(js_bigint(
+            self.engine
+                .node
+                .query("getSinkBlueScore", json!({}))
+                .await?
+                .get("blueScore"),
+        )?)?;
+        let max_lag = self.pool.max_lag();
+        for url in locals {
+            if let Ok(Ok(p)) =
+                tokio::time::timeout(Duration::from_secs(6), (self.pool.probe)(url.clone())).await
+                && active_blue.saturating_sub(p.blue_score) <= max_lag
+            {
+                let res = self.pool.elect(Some(&self.engine.node)).await?;
+                let next = self.engine.node.url();
+                if next.as_deref().is_some_and(node_pool::is_local_url) {
+                    log(
+                        "LOCAL_NODE_RECLAIMED",
+                        json!({"network": self.net().key, "from": cur, "to": next, "chosen": res["chosen"]}),
+                    );
+                    self.engine.run_reconcile();
+                }
+                break;
+            }
+        }
+        Ok(())
+    }
 }
 pub struct Pool {
     pub net: &'static Network,
@@ -92,7 +138,12 @@ impl Pool {
             .iter()
             .filter_map(|v| v["url"].as_str().map(str::to_owned))
             .collect();
-        let discovered = node_pool::discover_from_resolvers(&self.http, self.net, 2).await;
+        let has_local = managed.iter().any(|u| node_pool::is_local_url(u));
+        let discovered = if has_local {
+            vec![]
+        } else {
+            node_pool::discover_from_resolvers(&self.http, self.net, 2).await
+        };
         Ok(node_pool::dedup(
             managed
                 .into_iter()
@@ -104,6 +155,10 @@ impl Pool {
     pub async fn elect(&self, node: Option<&Arc<DualNode>>) -> Result<Value> {
         let p = node_pool::probe_pool(self.candidates().await?, self.probe.clone(), self.max_lag())
             .await;
+        crate::log::log(
+            "POOL_ELECT",
+            json!({"network": self.net.key, "healthy": p.healthy.iter().map(|h| json!({"url": h.url, "rtt": h.rtt_ms, "lag": h.lag})).collect::<Vec<_>>(), "rejected": p.rejected}),
+        );
         let pair = node_pool::choose_pair(&p.healthy, &[]);
         if pair.is_empty() {
             bail!("POOL_NO_HEALTHY_NODE {}", self.net.key);
@@ -253,6 +308,7 @@ pub async fn start_view(
         (checkpoint_ms, "checkpoint"),
         (reconcile_ms, "reconcile"),
         (5000, "retry"),
+        (60_000, "local_reclaim"),
     ] {
         let v = view.clone();
         tasks.push(tokio::spawn(async move {
@@ -272,6 +328,7 @@ pub async fn start_view(
                         e.run_finality();
                         Ok(())
                     }
+                    "local_reclaim" => v.reclaim_local_if_ready().await,
                     _ => e.retry_pending(),
                 };
                 if let Err(err) = r {

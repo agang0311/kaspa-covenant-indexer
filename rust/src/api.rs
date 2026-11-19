@@ -763,7 +763,9 @@ fn rolling_api(
     virtual_daa: Option<&str>,
     cp: Option<&crate::store::Checkpoint>,
 ) -> Result<Response> {
-    if view.net().key != "tn10" || profile_id != crate::contracts::rolling_v1::PROFILE_ID {
+    if !view.engine.contracts().has_rolling()
+        || profile_id != crate::contracts::rolling_v1::PROFILE_ID
+    {
         return Ok(response(404, json!({"detail":"NOT_FOUND"})));
     }
     let db = view.engine.store.db();
@@ -1026,7 +1028,11 @@ fn rolling_api(
                 return Ok(response(404, json!({"detail":"NOT_FOUND"})));
             };
             let (round_text, historical_shards) =
-                crate::contracts::rolling_v1::export_round_text(&r.data, virtual_daa)?;
+                crate::contracts::rolling_v1::export_round_text_for_network(
+                    &r.data,
+                    virtual_daa,
+                    view.net().network_id,
+                )?;
             let revision = db.transition_count(&r.id)?;
             Ok(response(
                 200,

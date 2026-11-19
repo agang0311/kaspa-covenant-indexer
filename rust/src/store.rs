@@ -18,6 +18,32 @@ fn dec(s: Option<String>) -> Value {
     }
 }
 
+fn enc_compressed(v: &Value) -> Vec<u8> {
+    use flate2::{Compression, write::ZlibEncoder};
+    let mut e = ZlibEncoder::new(Vec::new(), Compression::fast());
+    if serde_json::to_writer(&mut e, v).is_ok()
+        && let Ok(bytes) = e.finish()
+    {
+        return bytes;
+    }
+    enc(v).into_bytes()
+}
+
+fn dec_ref(v: rusqlite::types::ValueRef<'_>) -> Value {
+    use flate2::read::ZlibDecoder;
+    use rusqlite::types::ValueRef;
+    match v {
+        ValueRef::Null => Value::Null,
+        ValueRef::Text(b) => serde_json::from_slice(b).unwrap_or(Value::Null),
+        ValueRef::Blob(b) => {
+            let mut d = ZlibDecoder::new(b);
+            serde_json::from_reader(&mut d)
+                .unwrap_or_else(|_| serde_json::from_slice(b).unwrap_or(Value::Null))
+        }
+        _ => Value::Null,
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct RoundRow {
     pub id: String,
@@ -143,7 +169,7 @@ fn row_transition(r: &Row) -> rusqlite::Result<TransitionRow> {
         accepting_daa: r.get("accepting_daa")?,
         accepting_blue_score: r.get("accepting_blue_score")?,
         containing: r.get("containing")?,
-        previous: dec(r.get("previous")?),
+        previous: dec_ref(r.get_ref("previous")?),
         next: dec(r.get("next")?),
         evidence: dec(r.get("evidence")?),
         observed_at: r.get("observed_at")?,
@@ -153,8 +179,14 @@ fn row_transition(r: &Row) -> rusqlite::Result<TransitionRow> {
 impl Store {
     pub fn open(path: &str, default_contract: Option<&str>, network: &str) -> Result<Store> {
         let conn = Connection::open(path)?;
+        let av: i64 = conn
+            .query_row("PRAGMA auto_vacuum", [], |r| r.get(0))
+            .unwrap_or(0);
+        if av != 2 {
+            let _ = conn.execute_batch("PRAGMA auto_vacuum=INCREMENTAL; VACUUM;");
+        }
         conn.execute_batch(
-            "PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON;
+            "PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON; PRAGMA cache_size=-1024; PRAGMA temp_store=FILE;
       CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS rounds(
         id TEXT PRIMARY KEY, contract TEXT, data TEXT NOT NULL, address TEXT, status TEXT NOT NULL,
@@ -173,6 +205,12 @@ impl Store {
         attempts INTEGER NOT NULL DEFAULT 0, error TEXT, updated_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS journal(id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, kind TEXT NOT NULL, data TEXT NOT NULL);",
         )?;
+        let free_pages: i64 = conn
+            .query_row("PRAGMA freelist_count", [], |r| r.get(0))
+            .unwrap_or(0);
+        if free_pages > 256 {
+            let _ = run_incremental_vacuum(&conn, 0);
+        }
         let db = Db(conn);
         // Network binding: claim an empty DB, or fail closed when the file belongs to a different network.
         match db.get_meta("network")? {
@@ -381,6 +419,14 @@ impl Db {
             .query_row([id], row_round)
             .optional()?)
     }
+    pub fn round_headers(&self) -> Result<Vec<(String, Option<String>, Option<String>, String)>> {
+        let mut st = self
+            .0
+            .prepare_cached("SELECT id, contract, address, status FROM rounds")?;
+        Ok(st
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?)
+    }
     pub fn rounds(&self, live_only: bool, active_only: bool) -> Result<Vec<RoundRow>> {
         let wh = if live_only {
             "WHERE status='LIVE'"
@@ -552,15 +598,17 @@ impl Db {
     }
     pub fn add_transition(&self, t: &NewTransition) -> Result<()> {
         let is_final = t.status == "FINAL";
-        let prev_enc = if is_final {
+        let prev_enc: Option<Vec<u8>> = if is_final {
             None
         } else {
-            t.previous.filter(|p| crate::util::truthy(Some(p))).map(enc)
+            t.previous
+                .filter(|p| crate::util::truthy(Some(p)))
+                .map(enc_compressed)
         };
         let next_enc = if is_final {
             compact_final_next(t.next, t.contract)
         } else {
-            enc(t.next)
+            compact_active_next(t.next)
         };
         self.0
             .prepare_cached(
@@ -669,7 +717,7 @@ impl Db {
             .collect::<rusqlite::Result<Vec<_>>>()?)
     }
     pub fn set_transition_status(&self, round_id: &str, seq: i64, status: &str) -> Result<()> {
-        if status == "FINAL" {
+        if matches!(status, "FINAL" | "ROLLED_BACK") {
             let row: Option<(Option<String>, String)> = self
                 .0
                 .prepare_cached("SELECT contract, next FROM transitions WHERE round_id=? AND seq=?")?
@@ -677,13 +725,9 @@ impl Db {
                 .optional()?;
             if let Some((contract, next_raw)) = row {
                 let contract = contract.unwrap_or_default();
-                let next_compact = if contract.starts_with("rolling-v1@") {
-                    serde_json::from_str::<Value>(&next_raw)
-                        .map(|v| compact_final_next(&v, &contract))
-                        .unwrap_or(next_raw)
-                } else {
-                    next_raw
-                };
+                let next_compact = serde_json::from_str::<Value>(&next_raw)
+                    .map(|v| compact_final_next(&v, &contract))
+                    .unwrap_or(next_raw);
                 self.0
                     .prepare_cached("UPDATE transitions SET status=?, previous=NULL, next=? WHERE round_id=? AND seq=?")?
                     .execute(params![status, next_compact, round_id, seq])?;
@@ -850,9 +894,9 @@ impl Db {
         loop {
             let mut st = self.0.prepare_cached(
                 "SELECT round_id, seq, contract, next FROM transitions
-                 WHERE status='FINAL' AND (
+                 WHERE status IN ('FINAL', 'ROLLED_BACK') AND (
                    previous IS NOT NULL
-                   OR (contract LIKE 'rolling-v1@%' AND (next LIKE '%\"receipts\":%' OR next LIKE '%\"history\":%'))
+                   OR LENGTH(next) > 512
                  ) LIMIT 200",
             )?;
             let rows: Vec<(String, i64, Option<String>, String)> = st
@@ -868,13 +912,9 @@ impl Db {
             )?;
             for (round_id, seq, contract, next_raw) in rows {
                 let c = contract.unwrap_or_default();
-                let next_compact = if c.starts_with("rolling-v1@") {
-                    serde_json::from_str::<Value>(&next_raw)
-                        .map(|v| compact_final_next(&v, &c))
-                        .unwrap_or(next_raw)
-                } else {
-                    next_raw
-                };
+                let next_compact = serde_json::from_str::<Value>(&next_raw)
+                    .map(|v| compact_final_next(&v, &c))
+                    .unwrap_or(next_raw);
                 upd.execute(params![next_compact, round_id, seq])?;
             }
             drop(upd);
@@ -925,25 +965,75 @@ impl Db {
         let _ = self.0.execute_batch("VACUUM; PRAGMA wal_checkpoint(TRUNCATE);");
         Ok(())
     }
+
+    pub fn incremental_vacuum(&self, pages: usize) -> Result<()> {
+        let _ = run_incremental_vacuum(&self.0, pages);
+        let _ = self.0.execute_batch("PRAGMA shrink_memory;");
+        Ok(())
+    }
+
+    pub fn shrink_memory(&self) {
+        let _ = self.0.execute_batch("PRAGMA shrink_memory;");
+    }
 }
 
-fn compact_final_next(next: &Value, contract: &str) -> String {
-    if !contract.starts_with("rolling-v1@") {
-        return enc(next);
+fn run_incremental_vacuum(conn: &Connection, pages: usize) -> Result<()> {
+    let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
+    let sql = if pages == 0 {
+        "PRAGMA incremental_vacuum(1000000)".to_string()
+    } else {
+        format!("PRAGMA incremental_vacuum({pages})")
+    };
+    {
+        let mut st = conn.prepare(&sql)?;
+        let mut rows = st.query([])?;
+        while rows.next()?.is_some() {}
     }
+    let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
+    Ok(())
+}
+
+fn compact_active_next(next: &Value) -> String {
     let Some(obj) = next.as_object() else {
         return enc(next);
     };
-    let mut slim = obj.clone();
+    let mut slim = serde_json::Map::new();
     for k in [
-        "receipts",
-        "history",
+        "id",
+        "cid",
+        "version",
+        "terminal",
+        "step",
+        "module",
+        "latestTxid",
+        "accepting",
         "latestTransaction",
-        "genesisTransaction",
-        "preimages",
-        "redeemHex",
     ] {
-        slim.shift_remove(k);
+        if let Some(v) = obj.get(k) {
+            slim.insert(k.to_string(), v.clone());
+        }
+    }
+    enc(&Value::Object(slim))
+}
+
+fn compact_final_next(next: &Value, _contract: &str) -> String {
+    let Some(obj) = next.as_object() else {
+        return enc(next);
+    };
+    let mut slim = serde_json::Map::new();
+    for k in [
+        "id",
+        "cid",
+        "version",
+        "terminal",
+        "step",
+        "module",
+        "latestTxid",
+        "accepting",
+    ] {
+        if let Some(v) = obj.get(k) {
+            slim.insert(k.to_string(), v.clone());
+        }
     }
     enc(&Value::Object(slim))
 }

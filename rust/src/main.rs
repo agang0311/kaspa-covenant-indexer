@@ -1,3 +1,11 @@
+#[cfg(target_os = "linux")]
+#[global_allocator]
+static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+
+#[cfg(target_os = "linux")]
+#[unsafe(export_name = "_rjem_malloc_conf")]
+pub static MALLOC_CONF: &[u8] = b"dirty_decay_ms:1000,muzzy_decay_ms:1000\0";
+
 mod address;
 mod api;
 #[cfg(test)]
@@ -76,7 +84,7 @@ struct Cli {
     #[arg(long)]
     relay_file: Option<String>,
 }
-#[tokio::main(worker_threads = 4)]
+#[tokio::main(worker_threads = 2)]
 async fn main() -> Result<()> {
     let _ = rustls::crypto::ring::default_provider().install_default();
     let cli = Cli::parse();
@@ -182,6 +190,7 @@ async fn main() -> Result<()> {
         let config = engine::EngineConfig {
             rest_url: rest,
             finality_blue_score: i128::from(cli.finality_blue_score),
+            relay_enabled: cli.relay.is_some() || cli.relay_file.is_some(),
             ..Default::default()
         };
         let (view, events) =

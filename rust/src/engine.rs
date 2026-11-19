@@ -52,6 +52,8 @@ pub struct EngineConfig {
     pub auto_catchup: bool,
     /// Spender / Genesis hint oracle (REST). Hints only: consensus fields always come from the node.
     pub rest_url: Option<String>,
+    /// Only enqueue relay outbox rows when a relay consumer (--relay / --relay-file) is configured.
+    pub relay_enabled: bool,
 }
 
 impl Default for EngineConfig {
@@ -64,12 +66,13 @@ impl Default for EngineConfig {
             genesis_lookback_ms: 30_000,
             fast_lookback_ms: 4000,
             fast_max_age_ms: 120_000,
-            fast_max_pages: 2,
+            fast_max_pages: 6,
             window_blue: 100,
             window_slice_ms: 20_000,
             window_pages: 200,
             auto_catchup: true,
             rest_url: None,
+            relay_enabled: false,
         }
     }
 }
@@ -417,22 +420,23 @@ impl Engine {
         }
         // Every stored round must still have its own contract plugin loaded; never re-interpret it with another one.
         let c = self.contracts();
-        let all = self.store.db().rounds(false, false)?;
-        for r in &all {
-            if r.status == "LIVE" && !c.has(r.contract.as_deref().unwrap_or("\u{0}")) {
+        let all = self.store.db().round_headers()?;
+        for (id, contract, _address, status) in &all {
+            if status == "LIVE" && !c.has(contract.as_deref().unwrap_or("\u{0}")) {
                 bail!(
                     "LIVE_ROUND_CONTRACT_NOT_LOADED {} {}",
-                    r.id,
-                    r.contract.as_deref().unwrap_or("null")
+                    id,
+                    contract.as_deref().unwrap_or("null")
                 );
             }
         }
         for a in c.watch_addresses() {
             self.subscribe(Some(&a)).await?;
         }
-        let live = self.store.db().rounds(true, false)?;
-        for r in live {
-            self.subscribe(r.address.as_deref()).await?;
+        for (_id, _contract, address, status) in &all {
+            if status == "LIVE" {
+                self.subscribe(address.as_deref()).await?;
+            }
         }
         self.initialize_discovery_scan().await?;
         self.checkpoint().await?;
@@ -689,6 +693,7 @@ impl Engine {
                 Some(t) if !added.is_empty() && t < sink_blue => {
                     from = added.last().unwrap().clone();
                     from_blue = t;
+                    w = (w * 2).min(128);
                 }
                 _ => return Ok(None),
             }
@@ -1346,9 +1351,14 @@ impl Engine {
             self.from_mempool(rec.address.as_deref(), &tip, cid.as_deref())
                 .await
         };
+        if candidates.is_empty() && self.config.rest_url.is_some() {
+            candidates = self
+                .from_rest(rec.address.as_deref(), &tip, cid.as_deref())
+                .await;
+        }
         let mut window_continues = false;
         if candidates.is_empty() {
-            // Node-first: bounded accepted-chain walk on the node before touching REST hints.
+            // Bounded accepted-chain walk on the node when fast path, mempool and REST hints all missed.
             let resume = format!("window:{round_id}");
             for hint in &starts {
                 // A start that left the selected chain is replaced by its selected-chain ancestor (a superset scan).
@@ -1396,11 +1406,6 @@ impl Engine {
                 };
                 return self.apply_spend(&rec, c, &w.acc).await;
             }
-        }
-        if candidates.is_empty() && self.config.rest_url.is_some() {
-            candidates = self
-                .from_rest(rec.address.as_deref(), &tip, cid.as_deref())
-                .await;
         }
         if candidates.is_empty() {
             let observed = now_ms();
@@ -1470,8 +1475,18 @@ impl Engine {
     async fn apply_spend(
         self: &Arc<Self>,
         rec: &RoundRow,
+        chosen: Candidate,
+        acc: &Acc,
+    ) -> Result<String> {
+        self.apply_spend_mode(rec, chosen, acc, false).await
+    }
+
+    async fn apply_spend_mode(
+        self: &Arc<Self>,
+        rec: &RoundRow,
         mut chosen: Candidate,
         acc: &Acc,
+        skip_live_probe: bool,
     ) -> Result<String> {
         let plugin = self
             .contracts()
@@ -1538,10 +1553,19 @@ impl Engine {
                 k
             }
         };
-        self.commit(Some(rec), next, chosen, acc, &kind, &plugin.key)
-            .await
+        self.commit(
+            Some(rec),
+            next,
+            chosen,
+            acc,
+            &kind,
+            &plugin.key,
+            skip_live_probe,
+        )
+        .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn commit(
         self: &Arc<Self>,
         rec: Option<&RoundRow>,
@@ -1550,6 +1574,7 @@ impl Engine {
         acc: &Acc,
         kind: &str,
         contract: &str,
+        skip_live_probe: bool,
     ) -> Result<String> {
         let next_id = next["id"].as_str().unwrap_or_default().to_string();
         let has_tip = truthy(next.get("tip"));
@@ -1566,12 +1591,18 @@ impl Engine {
             .next()
             .and_then(|c| c.virtual_daa.parse::<u64>().ok())
             .unwrap_or(0);
-        let is_historical = cur_daa as i128 > acc.daa + 1000;
+        let is_historical = skip_live_probe || cur_daa as i128 > acc.daa + 100;
         if next_address.is_some() && !is_historical {
             self.subscribe(next_address.as_deref()).await?; // subscribe first: no notification gap
         }
         let utxo_check;
-        if has_tip {
+        if skip_live_probe {
+            utxo_check = if has_tip {
+                "SKIPPED_BATCH_HISTORICAL"
+            } else {
+                "TERMINAL_BATCH_HISTORICAL"
+            };
+        } else if has_tip {
             if let Some(u) = self
                 .live_utxo(next_address.as_deref(), &next["tip"])
                 .await?
@@ -1580,7 +1611,7 @@ impl Engine {
                     self.subscribe(next_address.as_deref()).await?;
                 }
                 // GHOSTDAG: containing DAA <= accepting DAA (parallel blocks are merged later); never strict equality.
-                let daa_ok = u.block_daa_score <= acc.daa && acc.daa - u.block_daa_score <= 200;
+                let daa_ok = u.block_daa_score <= acc.daa && acc.daa - u.block_daa_score <= 2000;
                 let cid_ok = match (&u.covenant_id, next.get("cid")) {
                     (Some(a), Some(Value::String(b))) => a == b,
                     (None, Some(Value::Null)) => true,
@@ -1657,26 +1688,28 @@ impl Engine {
             if kind == "GENESIS" {
                 db.discovery_result(&next_id, "APPLIED", now, None)?;
             }
-            let row = TransitionRow {
-                txid: chosen.txid.clone(),
-                round_id: next_id.clone(),
-                contract: Some(contract.to_string()),
-                seq,
-                kind: kind.to_string(),
-                status: status.into(),
-                accepting: acc.hash.clone(),
-                accepting_daa: daa_s.clone(),
-                accepting_blue_score: blue_s.clone(),
-                containing: chosen.containing.clone(),
-                previous: previous.clone(),
-                next: next.clone(),
-                evidence: evidence.clone(),
-                observed_at: now,
-            };
-            db.enqueue(
-                &self.relay_payload("transition", &row, next_address.as_deref()),
-                now,
-            )?;
+            if self.config.relay_enabled {
+                let row = TransitionRow {
+                    txid: chosen.txid.clone(),
+                    round_id: next_id.clone(),
+                    contract: Some(contract.to_string()),
+                    seq,
+                    kind: kind.to_string(),
+                    status: status.into(),
+                    accepting: acc.hash.clone(),
+                    accepting_daa: daa_s.clone(),
+                    accepting_blue_score: blue_s.clone(),
+                    containing: chosen.containing.clone(),
+                    previous: previous.clone(),
+                    next: next.clone(),
+                    evidence: evidence.clone(),
+                    observed_at: now,
+                };
+                db.enqueue(
+                    &self.relay_payload("transition", &row, next_address.as_deref()),
+                    now,
+                )?;
+            }
             Ok(Ok(seq))
         })?;
         let seq = match outcome {
@@ -1735,12 +1768,14 @@ impl Engine {
         let now = now_ms();
         self.store.tx(|db| {
             db.set_round_status(&rec.id, "STALE", now)?;
-            db.enqueue(
-                &json!({"schema": "kaswin-event-indexer/1", "type": "stale", "network": self.net.key, "roundId": rec.id,
-                    "contract": rec.contract, "txid": chosen.txid, "accepting": acc.hash, "error": message,
-                    "note": "Accepted spend did not match the pinned contract plugin rules; state NOT advanced"}),
-                now,
-            )?;
+            if self.config.relay_enabled {
+                db.enqueue(
+                    &json!({"schema": "kaswin-event-indexer/1", "type": "stale", "network": self.net.key, "roundId": rec.id,
+                        "contract": rec.contract, "txid": chosen.txid, "accepting": acc.hash, "error": message,
+                        "note": "Accepted spend did not match the pinned contract plugin rules; state NOT advanced"}),
+                    now,
+                )?;
+            }
             db.log("STALE", &json!({"round": rec.id, "txid": chosen.txid, "message": message}), now)
         })?;
         Ok("STALE".into())
@@ -2044,7 +2079,7 @@ impl Engine {
             source: source.to_string(),
             recovered: None,
         };
-        self.commit(None, round, c, &found.acc, "GENESIS", &plugin.key)
+        self.commit(None, round, c, &found.acc, "GENESIS", &plugin.key, false)
             .await
     }
 
@@ -2156,10 +2191,21 @@ impl Engine {
         })
     }
 
-    /// Add version/lockTime from the containing block body after exact comparison of all shared consensus fields.
     async fn hydrate(&self, high: &Value) -> Result<Value> {
+        let hash = high
+            .get("verboseData")
+            .and_then(|vd| vd.get("blockHash"))
+            .cloned()
+            .unwrap_or(Value::Null);
+        let r = self
+            .q("getBlock", json!({"hash": hash, "includeTransactions": true}))
+            .await?;
+        Self::hydrate_from_block(high, &r)
+    }
+
+    /// Add version/lockTime from a fetched block body after exact comparison of all shared consensus fields.
+    fn hydrate_from_block(high: &Value, r: &Value) -> Result<Value> {
         let vd = high.get("verboseData").cloned().unwrap_or(Value::Null);
-        let r = self.q("getBlock", json!({"hash": vd.get("blockHash").cloned().unwrap_or(Value::Null), "includeTransactions": true})).await?;
         let want = vd
             .get("transactionId")
             .and_then(|t| t.as_str())
@@ -2203,7 +2249,10 @@ impl Engine {
         f.status = "FINAL".into();
         self.store.tx(|db| {
             db.set_transition_status(&t.round_id, t.seq, "FINAL")?;
-            db.enqueue(&self.relay_payload("final", &f, None), now)
+            if self.config.relay_enabled {
+                db.enqueue(&self.relay_payload("final", &f, None), now)?;
+            }
+            Ok(())
         })
     }
 
@@ -2214,6 +2263,7 @@ impl Engine {
         }
         let sink = self.sink_blue().await?;
         let mut rolled: HashSet<String> = HashSet::new();
+        let mut finalized = 0usize;
         for t in open {
             if rolled.contains(&t.round_id) {
                 continue;
@@ -2243,10 +2293,28 @@ impl Engine {
                 let full = self.store.db().transition(&t.round_id, t.seq)?;
                 if let Some(full) = full {
                     self.finalize(&full)?;
+                    finalized += 1;
                 }
             }
         }
+        if finalized > 0 {
+            let _ = self.store.db().incremental_vacuum(0);
+        }
+        self.trim_heap();
         Ok(())
+    }
+
+    fn trim_heap(&self) {
+        self.store.db().shrink_memory();
+        #[cfg(target_env = "gnu")]
+        {
+            unsafe extern "C" {
+                fn malloc_trim(pad: usize) -> i32;
+            }
+            unsafe {
+                malloc_trim(0);
+            }
+        }
     }
 
     /// Accepting block left the selected chain: undo this and later transitions, then re-resolve from the chain.
@@ -2273,7 +2341,9 @@ impl Engine {
                 db.set_transition_status(&u.round_id, u.seq, "ROLLED_BACK")?;
                 let mut r = u.clone();
                 r.status = "ROLLED_BACK".into();
-                db.enqueue(&self.relay_payload("rollback", &r, None), now)?;
+                if self.config.relay_enabled {
+                    db.enqueue(&self.relay_payload("rollback", &r, None), now)?;
+                }
             }
             if truthy(Some(prev)) {
                 db.put_round(prev, prev_address.as_deref(), now, &contract)?;
@@ -2399,14 +2469,14 @@ impl Engine {
                 spent_rounds.push(x);
             }
         }
-        let is_local = self
-            .node
-            .url()
-            .is_some_and(|u| u.contains("127.0.0.1") || u.contains("localhost"));
         let mut batch_applied = 0usize;
-        if !spent_rounds.is_empty() && (is_local || spent_rounds.len() >= 2) {
+        let mut batch_remaining = 0usize;
+        if !spent_rounds.is_empty() {
             match self.batch_catchup(&spent_rounds).await {
-                Ok(n) => batch_applied = n,
+                Ok((n, rem)) => {
+                    batch_applied = n;
+                    batch_remaining = rem;
+                }
                 Err(e) => {
                     self.store.log(
                         "BATCH_CATCHUP_ERROR",
@@ -2414,6 +2484,9 @@ impl Engine {
                     );
                 }
             }
+        }
+        if batch_applied > 0 && batch_remaining > 0 {
+            self.run_reconcile();
         }
         if batch_applied == 0 {
             for x in spent_rounds {
@@ -2425,11 +2498,12 @@ impl Engine {
                 }
             }
         }
+        self.trim_heap();
         Ok(())
     }
 
     /// Single-pass sequential chain scanner: walks V2 High chain blocks once and advances all matching active tips.
-    async fn batch_catchup(self: &Arc<Self>, rounds: &[RoundRow]) -> Result<usize> {
+    async fn batch_catchup(self: &Arc<Self>, rounds: &[RoundRow]) -> Result<(usize, usize)> {
         let mut active_tips: HashMap<String, RoundRow> = HashMap::new();
         let mut earliest: Option<(i128, String)> = None;
         for r in rounds {
@@ -2453,10 +2527,10 @@ impl Engine {
             }
         }
         if active_tips.is_empty() {
-            return Ok(0);
+            return Ok((0, 0));
         }
         let Some((earliest_blue, raw_start)) = earliest else {
-            return Ok(0);
+            return Ok((0, active_tips.len()));
         };
         let mut from = self
             .chain_ancestor(&raw_start, 256)
@@ -2478,13 +2552,18 @@ impl Engine {
         let target = crate::window_scan::page_tx_target();
         let mut blocks_scanned = 0usize;
         let mut applied_count = 0usize;
+        let mut block_cache: HashMap<String, Value> = HashMap::new();
 
         while !active_tips.is_empty() && now_ms() < until {
-            let current = js_bigint(
-                self.q("getSinkBlueScore", json!({}))
-                    .await?
-                    .get("blueScore"),
-            )?;
+            let current = if from_blue + w >= sink_blue {
+                js_bigint(
+                    self.q("getSinkBlueScore", json!({}))
+                        .await?
+                        .get("blueScore"),
+                )?
+            } else {
+                sink_blue
+            };
             let want = from_blue + w;
             let min = if current > want { current - want } else { 0 };
             let r = self
@@ -2540,9 +2619,24 @@ impl Engine {
                     let Some(rec) = active_tips.remove(&tip_key) else {
                         continue;
                     };
-                    let acc = match self.header(block_hash).await {
-                        Ok(h) if h.is_chain => h,
-                        _ => continue,
+                    let cbh = row.get("chainBlockHeader");
+                    let acc = if let Some(h) = cbh
+                        && js_string(h.get("hash")) == *block_hash
+                        && !crate::util::is_nullish(h.get("daaScore"))
+                        && !crate::util::is_nullish(h.get("blueScore"))
+                    {
+                        Acc {
+                            hash: block_hash.clone(),
+                            daa: js_bigint(h.get("daaScore"))?,
+                            blue_score: js_bigint(h.get("blueScore"))?,
+                            is_chain: true,
+                            selected_parent: None,
+                        }
+                    } else {
+                        match self.header(block_hash).await {
+                            Ok(h) if h.is_chain => h,
+                            _ => continue,
+                        }
                     };
                     let mut tx = canonical(&raw_tx);
                     let containing = tx["verboseData"]
@@ -2551,10 +2645,33 @@ impl Engine {
                         .map(str::to_owned);
                     let mut source = "vc-batch".to_string();
                     if !is_full_transaction(&tx) {
-                        tx = match self.hydrate(&tx).await {
-                            Ok(h) => h,
-                            Err(_) => continue,
-                        };
+                        if let Some(bh) = containing.as_deref() {
+                            if !block_cache.contains_key(bh) {
+                                if block_cache.len() >= 16 {
+                                    block_cache.clear();
+                                }
+                                let blk = match self
+                                    .q(
+                                        "getBlock",
+                                        json!({"hash": bh, "includeTransactions": true}),
+                                    )
+                                    .await
+                                {
+                                    Ok(b) => b,
+                                    Err(_) => continue,
+                                };
+                                block_cache.insert(bh.to_string(), blk);
+                            }
+                            tx = match Self::hydrate_from_block(&tx, &block_cache[bh]) {
+                                Ok(h) => h,
+                                Err(_) => continue,
+                            };
+                        } else {
+                            tx = match self.hydrate(&tx).await {
+                                Ok(h) => h,
+                                Err(_) => continue,
+                            };
+                        }
                         let _ = with_input_verbose(&mut tx, raw_tx);
                         source.push_str("+block");
                     }
@@ -2567,7 +2684,8 @@ impl Engine {
                         source,
                         recovered: None,
                     };
-                    if let Ok(res) = self.apply_spend(&rec, c, &acc).await
+                    let skip_live = acc.blue_score + 20 < sink_blue;
+                    if let Ok(res) = self.apply_spend_mode(&rec, c, &acc, skip_live).await
                         && res == "APPLIED"
                     {
                         applied_count += 1;
@@ -2621,15 +2739,22 @@ impl Engine {
             from = last;
             from_blue = top;
         }
+        // Ensure any round left active after skipping historical subscriptions is subscribed for live events.
+        for r in active_tips.values() {
+            let _ = self.subscribe(r.address.as_deref()).await;
+        }
+        let remaining = active_tips.len();
         self.store.log(
             "BATCH_CATCHUP_DONE",
             json!({
                 "blocks": blocks_scanned,
                 "applied": applied_count,
-                "remaining": active_tips.len()
+                "remaining": remaining
             }),
         );
-        Ok(applied_count)
+        drop(block_cache);
+        self.trim_heap();
+        Ok((applied_count, remaining))
     }
 
     pub fn relay_payload(&self, kind: &str, t: &TransitionRow, address: Option<&str>) -> Value {

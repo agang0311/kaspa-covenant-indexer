@@ -185,6 +185,9 @@ impl ContractRegistry {
     pub fn has(&self, key: &str) -> bool {
         self.plugins.iter().any(|p| p.key == key)
     }
+    pub fn has_rolling(&self) -> bool {
+        self.plugins.iter().any(|p| p.is_rolling())
+    }
     /// Only plugins still accepting new rounds are asked about Genesis; retired ones still verify their old rounds.
     pub fn for_genesis(&self, only: Option<&str>) -> Vec<Arc<Plugin>> {
         self.plugins
