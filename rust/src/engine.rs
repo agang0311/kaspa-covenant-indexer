@@ -430,14 +430,15 @@ impl Engine {
                 );
             }
         }
-        for a in c.watch_addresses() {
-            self.subscribe(Some(&a)).await?;
-        }
+        let mut addrs: Vec<String> = c.watch_addresses();
         for (_id, _contract, address, status) in &all {
-            if status == "LIVE" {
-                self.subscribe(address.as_deref()).await?;
+            if status == "LIVE"
+                && let Some(a) = address.as_ref().filter(|a| !a.is_empty())
+            {
+                addrs.push(a.clone());
             }
         }
+        self.subscribe_many(&addrs).await?;
         self.initialize_discovery_scan().await?;
         self.checkpoint().await?;
         self.reconcile().await?;
@@ -459,6 +460,38 @@ impl Engine {
     }
 
     // ---------- subscriptions ----------
+    pub async fn subscribe_many(&self, addresses: &[String]) -> Result<()> {
+        let mut first_addrs = Vec::new();
+        {
+            let mut s = self.subs.lock().unwrap();
+            for a in addresses {
+                if a.is_empty() {
+                    continue;
+                }
+                let n = s.entry(a.clone()).or_insert(0);
+                *n += 1;
+                if *n == 1 {
+                    first_addrs.push(a.clone());
+                }
+            }
+        }
+        if !first_addrs.is_empty()
+            && let Err(e) = self.node.subscribe_utxos(&first_addrs).await
+        {
+            let mut s = self.subs.lock().unwrap();
+            for a in &first_addrs {
+                if let Some(n) = s.get_mut(a) {
+                    *n -= 1;
+                    if *n == 0 {
+                        s.shift_remove(a);
+                    }
+                }
+            }
+            return Err(e);
+        }
+        Ok(())
+    }
+
     pub async fn subscribe(&self, address: Option<&str>) -> Result<()> {
         let Some(a) = address.filter(|a| !a.is_empty()) else {
             return Ok(());
@@ -621,7 +654,11 @@ impl Engine {
         let mut from_blue = self.header(&from).await?.blue_score;
         let mut w: i128 = 32;
         for _ in 0..self.config.fast_max_pages {
-            let current = self.sink_blue().await?;
+            let current = if from_blue + w >= sink_blue {
+                self.sink_blue().await?
+            } else {
+                sink_blue
+            };
             let want = from_blue + w;
             let min = if current > want { current - want } else { 0 };
             let r = self.q("getVirtualChainFromBlockV2", json!({"startHash": from, "dataVerbosityLevel": "Full", "minConfirmationCount": min as u64})).await?;
@@ -758,6 +795,7 @@ impl Engine {
         &self,
         tip: &Value,
         start: &str,
+        start_blue: Option<i128>,
         resume_key: Option<&str>,
     ) -> Result<Option<Found>> {
         let sink_blue = self.sink_blue().await?;
@@ -766,11 +804,7 @@ impl Engine {
             Some(k) => self.store.db().get_meta(k)?.get(start).cloned(),
             None => None,
         };
-        let mut cur = Cursor {
-            from: start.to_string(),
-            from_blue: self.header(start).await?.blue_score,
-            w: None,
-        };
+        let mut cur_opt: Option<Cursor> = None;
         if let Some(f) = saved
             .as_ref()
             .and_then(|s| s.get("from"))
@@ -786,13 +820,24 @@ impl Engine {
                 Some(None)
             };
             if let Some(w) = w {
-                cur = Cursor {
+                cur_opt = Some(Cursor {
                     from: f,
                     from_blue: h.blue_score,
                     w,
-                };
+                });
             }
         }
+        let mut cur = match cur_opt {
+            Some(c) => c,
+            None => Cursor {
+                from: start.to_string(),
+                from_blue: match start_blue {
+                    Some(b) => b,
+                    None => self.header(start).await?.blue_score,
+                },
+                w: None,
+            },
+        };
         loop {
             if now_ms() > until {
                 self.window_mark(resume_key, start, &cur)?;
@@ -1172,7 +1217,7 @@ impl Engine {
     }
 
     /// First selected-chain block at or above `hash` by selected parents (bounded).
-    async fn chain_ancestor(&self, hash: &str, limit: usize) -> Result<Option<String>> {
+    async fn chain_ancestor(&self, hash: &str, limit: usize) -> Result<Option<Acc>> {
         let mut hash = Some(hash.to_string());
         for _ in 0..limit {
             let Some(h) = hash.filter(|h| !h.is_empty()) else {
@@ -1180,7 +1225,7 @@ impl Engine {
             };
             let hd = self.header(&h).await?;
             if hd.is_chain {
-                return Ok(Some(h));
+                return Ok(Some(hd));
             }
             hash = hd.selected_parent;
         }
@@ -1193,9 +1238,10 @@ impl Engine {
         rec: &RoundRow,
         hint: &TransitionRow,
     ) -> Result<(Option<String>, Option<String>)> {
-        let Some(start) = self.chain_ancestor(&hint.accepting, 256).await? else {
+        let Some(start_acc) = self.chain_ancestor(&hint.accepting, 256).await? else {
             return Ok((None, None));
         };
+        let start = start_acc.hash;
         let Some(acc) = self
             .acceptance(&hint.txid, std::slice::from_ref(&start))
             .await?
@@ -1370,7 +1416,10 @@ impl Engine {
                     );
                     continue;
                 };
-                let w = match self.window_find(&tip, &start, Some(&resume)).await {
+                let w = match self
+                    .window_find(&tip, &start.hash, Some(start.blue_score), Some(&resume))
+                    .await
+                {
                     Ok(w) => w,
                     Err(e) => {
                         let message = e.to_string();
@@ -1380,7 +1429,7 @@ impl Engine {
                         }
                         self.store.log(
                             "WINDOW_SCAN_FAILED",
-                            json!({"start": start, "message": message}),
+                            json!({"start": start.hash, "message": message}),
                         );
                         continue;
                     }
@@ -1484,10 +1533,22 @@ impl Engine {
     async fn apply_spend_mode(
         self: &Arc<Self>,
         rec: &RoundRow,
-        mut chosen: Candidate,
+        chosen: Candidate,
         acc: &Acc,
         skip_live_probe: bool,
     ) -> Result<String> {
+        self.apply_spend_mode_row(rec, chosen, acc, skip_live_probe)
+            .await
+            .map(|r| r.0)
+    }
+
+    async fn apply_spend_mode_row(
+        self: &Arc<Self>,
+        rec: &RoundRow,
+        mut chosen: Candidate,
+        acc: &Acc,
+        skip_live_probe: bool,
+    ) -> Result<(String, Option<RoundRow>)> {
         let plugin = self
             .contracts()
             .get(rec.contract.as_deref().unwrap_or("null"))?; // the rules this round was created under
@@ -1535,13 +1596,13 @@ impl Engine {
             Err(e) => {
                 let r = self.mark_stale(rec, &chosen, acc, &e.to_string())?;
                 self.unsubscribe(rec.address.as_deref()).await?;
-                return Ok(r);
+                return Ok((r, None));
             }
         };
         if next.get("id").and_then(|i| i.as_str()) != Some(rec.id.as_str()) {
             let r = self.mark_stale(rec, &chosen, acc, "PLUGIN_CHANGED_ROUND_ID")?;
             self.unsubscribe(rec.address.as_deref()).await?;
-            return Ok(r);
+            return Ok((r, None));
         }
         // Consumers must still see which block actually included the transaction when known.
         let next = spread(&next, json!({ "containing": chosen.containing }));
@@ -1575,7 +1636,7 @@ impl Engine {
         kind: &str,
         contract: &str,
         skip_live_probe: bool,
-    ) -> Result<String> {
+    ) -> Result<(String, Option<RoundRow>)> {
         let next_id = next["id"].as_str().unwrap_or_default().to_string();
         let has_tip = truthy(next.get("tip"));
         let next_address = if has_tip {
@@ -1657,6 +1718,23 @@ impl Engine {
         }
         // Accepted below the pruning point: consensus-irreversible, and no accepting header is left to recheck.
         let status = if chosen.recovered.is_some() { "FINAL" } else { "ACCEPTED" };
+        let mut next = next;
+        let delta_receipt = next
+            .as_object_mut()
+            .and_then(|m| m.shift_remove("_deltaReceipt"));
+        let delta_preimages: Vec<(String, String)> = next
+            .as_object_mut()
+            .and_then(|m| m.shift_remove("_deltaPreimages"))
+            .and_then(|v| v.as_array().cloned())
+            .map(|arr| {
+                arr.into_iter()
+                    .filter_map(|item| {
+                        let a = item.as_array()?;
+                        Some((a.first()?.as_str()?.to_string(), a.get(1)?.as_str()?.to_string()))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         let previous = rec.map(|r| r.data.clone()).unwrap_or(Value::Null);
         let (daa_s, blue_s) = (acc.daa.to_string(), acc.blue_score.to_string());
         // Idempotent: a txid already applied to this round is not re-applied.
@@ -1665,7 +1743,20 @@ impl Engine {
                 return Ok(Err(d.seq));
             }
             let seq = db.last_seq(&next_id)? + 1; // allocated inside the write transaction
+            if next.get("history").is_some() {
+                let mut pre = db.round_preimages(&next_id)?;
+                for (h, rh) in &delta_preimages {
+                    pre.insert(h.clone(), Value::String(rh.clone()));
+                }
+                crate::contracts::rolling_v1::fill_terminal_history_preimages(&mut next, &pre);
+            }
             db.put_round(&next, next_address.as_deref(), now, contract)?;
+            if let Some(ref dr) = delta_receipt {
+                db.add_round_receipt(&next_id, seq, dr)?;
+            }
+            if !delta_preimages.is_empty() {
+                db.add_round_preimages(&next_id, seq, &delta_preimages)?;
+            }
             if utxo_check == "SUCCESSOR_LIVE_MATCHES" {
                 db.mark_live_seen(&next_id, now)?;
             }
@@ -1722,7 +1813,7 @@ impl Engine {
                     json!({"round": next_id, "txid": chosen.txid, "existingSeq": existing}),
                     now,
                 );
-                return Ok("KNOWN".into());
+                return Ok(("KNOWN".into(), None));
             }
             Ok(seq) => seq,
         };
@@ -1755,7 +1846,20 @@ impl Engine {
         {
             self.run_spend(&next_id, None);
         }
-        Ok("APPLIED".into())
+        let updated = if has_tip {
+            Some(RoundRow {
+                id: next_id,
+                contract: Some(contract.to_string()),
+                data: next,
+                address: next_address,
+                status: "LIVE".into(),
+                live_seen_at: None,
+                updated_at: now,
+            })
+        } else {
+            None
+        };
+        Ok(("APPLIED".into(), updated))
     }
 
     fn mark_stale(
@@ -2081,6 +2185,7 @@ impl Engine {
         };
         self.commit(None, round, c, &found.acc, "GENESIS", &plugin.key, false)
             .await
+            .map(|r| r.0)
     }
 
     async fn accepted_high(&self, txid: &str, acc: &Acc) -> Result<Option<Hit>> {
@@ -2119,13 +2224,6 @@ impl Engine {
             || row["chainBlockHeader"]["hash"].as_str() != Some(acc.hash.as_str())
             || js_bigint(row["chainBlockHeader"].get("daaScore"))? != acc.daa
             || js_bigint(row["chainBlockHeader"].get("blueScore"))? != acc.blue_score
-        {
-            bail!("ACCEPTED_HEADER_CHANGED");
-        }
-        let current = self.header(&acc.hash).await?;
-        if !current.is_chain
-            || current.daa != acc.daa
-            || current.selected_parent != acc.selected_parent
         {
             bail!("ACCEPTED_HEADER_CHANGED");
         }
@@ -2263,23 +2361,50 @@ impl Engine {
         }
         let sink = self.sink_blue().await?;
         let mut rolled: HashSet<String> = HashSet::new();
+        let mut chain_set: HashSet<String> = HashSet::new();
+        let mut header_cache: HashMap<String, Acc> = HashMap::new();
         let mut finalized = 0usize;
         for t in open {
             if rolled.contains(&t.round_id) {
                 continue;
             }
-            let h = match self.header(&t.accepting).await {
-                Ok(h) => h,
-                Err(e) => {
-                    // Missing/pruned headers are absence of evidence, never a finality proof.
-                    self.store.log(
-                        "FINALITY_UNVERIFIED",
-                        json!({"round":t.round_id,"accepting":t.accepting,"message":e.to_string()}),
-                    );
-                    continue;
+            let is_chain = if chain_set.contains(&t.accepting) {
+                true
+            } else {
+                let h = if let Some(cached) = header_cache.get(&t.accepting) {
+                    cached.clone()
+                } else {
+                    match self.header(&t.accepting).await {
+                        Ok(h) => {
+                            header_cache.insert(t.accepting.clone(), h.clone());
+                            h
+                        }
+                        Err(e) => {
+                            // Missing/pruned headers are absence of evidence, never a finality proof.
+                            self.store.log(
+                                "FINALITY_UNVERIFIED",
+                                json!({"round":t.round_id,"accepting":t.accepting,"message":e.to_string()}),
+                            );
+                            continue;
+                        }
+                    }
+                };
+                if h.is_chain && chain_set.is_empty()
+                    && let Ok(vc) = self
+                        .q(
+                            "getVirtualChainFromBlock",
+                            json!({"startHash": h.hash, "includeAcceptedTransactionIds": false}),
+                        )
+                        .await
+                {
+                    chain_set.insert(h.hash.clone());
+                    for ah in strings(vc.get("addedChainBlockHashes")) {
+                        chain_set.insert(ah);
+                    }
                 }
+                h.is_chain
             };
-            if !h.is_chain {
+            if !is_chain {
                 let full = self.store.db().transition(&t.round_id, t.seq)?;
                 if let Some(full) = full {
                     self.rollback(&full).await?;
@@ -2290,9 +2415,15 @@ impl Engine {
             if sink - js_bigint(Some(&json!(t.accepting_blue_score)))?
                 >= self.config.finality_blue_score
             {
-                let full = self.store.db().transition(&t.round_id, t.seq)?;
-                if let Some(full) = full {
-                    self.finalize(&full)?;
+                if self.config.relay_enabled {
+                    let full = self.store.db().transition(&t.round_id, t.seq)?;
+                    if let Some(full) = full {
+                        self.finalize(&full)?;
+                        finalized += 1;
+                    }
+                } else {
+                    self.store
+                        .tx(|db| db.set_transition_status(&t.round_id, t.seq, "FINAL"))?;
                     finalized += 1;
                 }
             }
@@ -2351,6 +2482,7 @@ impl Engine {
                 db.mark_round_rolled_back(&t.round_id, now)?;
                 db.discovery_result(&t.round_id, "PENDING", now, Some("GENESIS_ROLLED_BACK"))?;
             }
+            db.rollback_round_extras(&t.round_id, t.seq)?;
             let txids: Vec<&str> = undo.iter().map(|u| u.txid.as_str()).collect();
             db.log(
                 "ROLLBACK",
@@ -2506,6 +2638,7 @@ impl Engine {
     async fn batch_catchup(self: &Arc<Self>, rounds: &[RoundRow]) -> Result<(usize, usize)> {
         let mut active_tips: HashMap<String, RoundRow> = HashMap::new();
         let mut earliest: Option<(i128, String)> = None;
+        let mut acc_cache: HashMap<String, Acc> = HashMap::new();
         for r in rounds {
             let Some(cur) = self.store.db().round(&r.id)? else {
                 continue;
@@ -2516,13 +2649,22 @@ impl Engine {
             let tip_key = outpoint_key(&cur.data["tip"]);
             active_tips.insert(tip_key, cur.clone());
             let accepting = js_string(cur.data.get("accepting"));
-            if !accepting.is_empty()
-                && let Ok(h) = self.header(&accepting).await
-                && h.is_chain
-            {
-                let start = h.selected_parent.unwrap_or_else(|| h.hash.clone());
-                if earliest.as_ref().is_none_or(|(b, _)| h.blue_score < *b) {
-                    earliest = Some((h.blue_score, start));
+            if !accepting.is_empty() {
+                let h = if let Some(cached) = acc_cache.get(&accepting) {
+                    Some(cached.clone())
+                } else if let Ok(fetched) = self.header(&accepting).await {
+                    acc_cache.insert(accepting.clone(), fetched.clone());
+                    Some(fetched)
+                } else {
+                    None
+                };
+                if let Some(h) = h
+                    && h.is_chain
+                {
+                    let start = h.selected_parent.unwrap_or_else(|| h.hash.clone());
+                    if earliest.as_ref().is_none_or(|(b, _)| h.blue_score < *b) {
+                        earliest = Some((h.blue_score, start));
+                    }
                 }
             }
         }
@@ -2532,17 +2674,10 @@ impl Engine {
         let Some((earliest_blue, raw_start)) = earliest else {
             return Ok((0, active_tips.len()));
         };
-        let mut from = self
-            .chain_ancestor(&raw_start, 256)
-            .await
-            .ok()
-            .flatten()
-            .unwrap_or(raw_start);
-        let mut from_blue = self
-            .header(&from)
-            .await
-            .map(|h| h.blue_score)
-            .unwrap_or(earliest_blue);
+        let (mut from, mut from_blue) = match self.chain_ancestor(&raw_start, 256).await.ok().flatten() {
+            Some(acc) => (acc.hash, acc.blue_score),
+            None => (raw_start, earliest_blue),
+        };
         let (dag_info, sink_blue) =
             tokio::try_join!(self.q("getBlockDagInfo", json!({})), self.sink_blue())?;
         let sink = js_string(dag_info.get("sink"));
@@ -2685,11 +2820,12 @@ impl Engine {
                         recovered: None,
                     };
                     let skip_live = acc.blue_score + 20 < sink_blue;
-                    if let Ok(res) = self.apply_spend_mode(&rec, c, &acc, skip_live).await
+                    if let Ok((res, updated_opt)) =
+                        self.apply_spend_mode_row(&rec, c, &acc, skip_live).await
                         && res == "APPLIED"
                     {
                         applied_count += 1;
-                        if let Ok(Some(updated)) = self.store.db().round(&rec.id)
+                        if let Some(updated) = updated_opt
                             && updated.status == "LIVE"
                             && truthy(updated.data.get("tip"))
                         {
@@ -2740,9 +2876,11 @@ impl Engine {
             from_blue = top;
         }
         // Ensure any round left active after skipping historical subscriptions is subscribed for live events.
-        for r in active_tips.values() {
-            let _ = self.subscribe(r.address.as_deref()).await;
-        }
+        let sub_addrs: Vec<String> = active_tips
+            .values()
+            .filter_map(|r| r.address.clone())
+            .collect();
+        let _ = self.subscribe_many(&sub_addrs).await;
         let remaining = active_tips.len();
         self.store.log(
             "BATCH_CATCHUP_DONE",

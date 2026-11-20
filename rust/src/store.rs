@@ -203,14 +203,22 @@ impl Store {
       CREATE TABLE IF NOT EXISTS outbox(id INTEGER PRIMARY KEY AUTOINCREMENT, payload TEXT NOT NULL, created_at INTEGER NOT NULL, delivered_at INTEGER);
       CREATE TABLE IF NOT EXISTS discoveries(txid TEXT PRIMARY KEY, hint TEXT NOT NULL, status TEXT NOT NULL,
         attempts INTEGER NOT NULL DEFAULT 0, error TEXT, updated_at INTEGER NOT NULL);
-      CREATE TABLE IF NOT EXISTS journal(id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, kind TEXT NOT NULL, data TEXT NOT NULL);",
+      CREATE TABLE IF NOT EXISTS journal(id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, kind TEXT NOT NULL, data TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS round_receipts(
+        round_id TEXT NOT NULL,
+        seq INTEGER NOT NULL,
+        receipt TEXT NOT NULL,
+        PRIMARY KEY(round_id, seq)
+      );
+      CREATE TABLE IF NOT EXISTS round_preimages(
+        round_id TEXT NOT NULL,
+        seq INTEGER NOT NULL,
+        hash TEXT NOT NULL,
+        redeem_hex TEXT NOT NULL,
+        PRIMARY KEY(round_id, hash)
+      );
+      CREATE INDEX IF NOT EXISTS round_preimages_round_seq ON round_preimages(round_id, seq);",
         )?;
-        let free_pages: i64 = conn
-            .query_row("PRAGMA freelist_count", [], |r| r.get(0))
-            .unwrap_or(0);
-        if free_pages > 256 {
-            let _ = run_incremental_vacuum(&conn, 0);
-        }
         let db = Db(conn);
         // Network binding: claim an empty DB, or fail closed when the file belongs to a different network.
         match db.get_meta("network")? {
@@ -264,11 +272,21 @@ impl Store {
             bail!("ACTIVE_DUPLICATE_TRANSITION {r} {t}: resolve manually before upgrading");
         }
         db.0.execute_batch("CREATE UNIQUE INDEX IF NOT EXISTS transitions_active_txid ON transitions(round_id, txid) WHERE status!='ROLLED_BACK'")?;
-        Ok(Store {
+        let store = Store {
             inner: Mutex::new(db),
             network: network.to_string(),
             path: path.to_string(),
-        })
+        };
+        let migrated = store.tx(|db| db.migrate_round_extras())?;
+        let free_pages: i64 = store
+            .db()
+            .0
+            .query_row("PRAGMA freelist_count", [], |r| r.get(0))
+            .unwrap_or(0);
+        if migrated > 0 || free_pages > 256 {
+            let _ = run_incremental_vacuum(&store.db().0, 0);
+        }
+        Ok(store)
     }
 
     /// Lock for a short, synchronous sequence of statements. Never hold across an await.
@@ -579,6 +597,16 @@ impl Db {
             )?
             .query_row([round_id, txid], row_transition)
             .optional()?)
+    }
+    pub fn has_rolled_back_transition(&self, round_id: &str, txid: &str) -> Result<bool> {
+        let hit: Option<i64> = self
+            .0
+            .prepare_cached(
+                "SELECT 1 FROM transitions WHERE round_id=? AND txid=? AND status='ROLLED_BACK' LIMIT 1",
+            )?
+            .query_row([round_id, txid], |r| r.get(0))
+            .optional()?;
+        Ok(hit.is_some())
     }
     pub fn any_active_transition_by_txid(&self, txid: &str) -> Result<Option<TransitionRow>> {
         Ok(self
@@ -970,6 +998,174 @@ impl Db {
         let _ = run_incremental_vacuum(&self.0, pages);
         let _ = self.0.execute_batch("PRAGMA shrink_memory;");
         Ok(())
+    }
+
+    pub fn add_round_receipt(&self, round_id: &str, seq: i64, receipt: &Value) -> Result<()> {
+        self.0
+            .prepare_cached(
+                "INSERT OR REPLACE INTO round_receipts(round_id, seq, receipt) VALUES(?, ?, ?)",
+            )?
+            .execute(params![round_id, seq, enc(receipt)])?;
+        Ok(())
+    }
+
+    pub fn add_round_preimages(
+        &self,
+        round_id: &str,
+        seq: i64,
+        preimages: &[(String, String)],
+    ) -> Result<()> {
+        if preimages.is_empty() {
+            return Ok(());
+        }
+        let mut st = self.0.prepare_cached(
+            "INSERT OR REPLACE INTO round_preimages(round_id, seq, hash, redeem_hex) VALUES(?, ?, ?, ?)",
+        )?;
+        for (h, hex) in preimages {
+            st.execute(params![round_id, seq, h, hex])?;
+        }
+        Ok(())
+    }
+
+    pub fn rollback_round_extras(&self, round_id: &str, from_seq: i64) -> Result<()> {
+        self.0
+            .prepare_cached("DELETE FROM round_receipts WHERE round_id=? AND seq>=?")?
+            .execute(params![round_id, from_seq])?;
+        self.0
+            .prepare_cached("DELETE FROM round_preimages WHERE round_id=? AND seq>=?")?
+            .execute(params![round_id, from_seq])?;
+        Ok(())
+    }
+
+    pub fn round_receipts(&self, round_id: &str) -> Result<Vec<Value>> {
+        let mut st = self
+            .0
+            .prepare_cached("SELECT receipt FROM round_receipts WHERE round_id=? ORDER BY seq ASC")?;
+        Ok(st
+            .query_map([round_id], |r| Ok(dec(r.get(0)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    pub fn round_preimages(&self, round_id: &str) -> Result<serde_json::Map<String, Value>> {
+        let mut st = self
+            .0
+            .prepare_cached("SELECT hash, redeem_hex FROM round_preimages WHERE round_id=?")?;
+        let mut out = serde_json::Map::new();
+        let rows = st.query_map([round_id], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })?;
+        for row in rows {
+            let (h, hex) = row?;
+            out.insert(h, Value::String(hex));
+        }
+        Ok(out)
+    }
+
+    pub fn round_receipt_txid_at(&self, round_id: &str, seq: i64) -> Result<Option<String>> {
+        let row: Option<Option<String>> = self
+            .0
+            .prepare_cached(
+                "SELECT json_extract(receipt, '$.txid') FROM round_receipts WHERE round_id=? AND seq=?",
+            )?
+            .query_row(params![round_id, seq], |r| r.get(0))
+            .optional()?;
+        Ok(row.flatten())
+    }
+
+    pub fn round_receipt_count_up_to(&self, round_id: &str, seq: i64) -> Result<i64> {
+        Ok(self
+            .0
+            .prepare_cached("SELECT COUNT(*) FROM round_receipts WHERE round_id=? AND seq<=?")?
+            .query_row(params![round_id, seq], |r| r.get(0))?)
+    }
+
+    pub fn round_receipts_after(&self, round_id: &str, seq: i64) -> Result<Vec<Value>> {
+        let mut st = self.0.prepare_cached(
+            "SELECT receipt FROM round_receipts WHERE round_id=? AND seq>? ORDER BY seq ASC",
+        )?;
+        Ok(st
+            .query_map(params![round_id, seq], |r| Ok(dec(r.get(0)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    pub fn round_preimages_after(
+        &self,
+        round_id: &str,
+        seq: i64,
+    ) -> Result<serde_json::Map<String, Value>> {
+        let mut st = self.0.prepare_cached(
+            "SELECT hash, redeem_hex FROM round_preimages WHERE round_id=? AND seq>?",
+        )?;
+        let mut out = serde_json::Map::new();
+        let rows = st.query_map(params![round_id, seq], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })?;
+        for row in rows {
+            let (h, hex) = row?;
+            out.insert(h, Value::String(hex));
+        }
+        Ok(out)
+    }
+
+    /// One-time migration: move embedded `receipts` and `preimages` out of `rounds.data` into incremental tables.
+    pub fn migrate_round_extras(&self) -> Result<usize> {
+        let mut st = self.0.prepare(
+            "SELECT id, data FROM rounds WHERE contract LIKE 'rolling-v1%' AND (json_extract(data, '$.receipts') IS NOT NULL OR json_extract(data, '$.preimages') IS NOT NULL)",
+        )?;
+        let rows: Vec<(String, String)> = st
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        drop(st);
+        if rows.is_empty() {
+            return Ok(0);
+        }
+        let mut migrated = 0usize;
+        for (id, raw) in rows {
+            let mut data: Value = match serde_json::from_str(&raw) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            let Some(obj) = data.as_object_mut() else {
+                continue;
+            };
+            let receipts = obj
+                .shift_remove("receipts")
+                .and_then(|v| match v {
+                    Value::Array(a) => Some(a),
+                    _ => None,
+                })
+                .unwrap_or_default();
+            let preimages = obj
+                .shift_remove("preimages")
+                .and_then(|v| match v {
+                    Value::Object(m) => Some(m),
+                    _ => None,
+                })
+                .unwrap_or_default();
+            if !receipts.is_empty() {
+                let mut ins = self.0.prepare_cached(
+                    "INSERT OR IGNORE INTO round_receipts(round_id, seq, receipt) VALUES(?, ?, ?)",
+                )?;
+                for (idx, rec) in receipts.iter().enumerate() {
+                    ins.execute(params![id, idx as i64, enc(rec)])?;
+                }
+            }
+            if !preimages.is_empty() {
+                let mut ins = self.0.prepare_cached(
+                    "INSERT OR IGNORE INTO round_preimages(round_id, seq, hash, redeem_hex) VALUES(?, 0, ?, ?)",
+                )?;
+                for (h, v) in preimages {
+                    if let Some(hex) = v.as_str() {
+                        ins.execute(params![id, h, hex])?;
+                    }
+                }
+            }
+            self.0
+                .prepare_cached("UPDATE rounds SET data=? WHERE id=?")?
+                .execute(params![enc(&data), id])?;
+            migrated += 1;
+        }
+        Ok(migrated)
     }
 
     pub fn shrink_memory(&self) {

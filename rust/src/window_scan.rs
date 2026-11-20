@@ -81,11 +81,15 @@ pub async fn scan_window(
                 w: Some(w),
             }));
         }
-        let current = js_bigint(
-            node.query("getSinkBlueScore", json!({}))
-                .await?
-                .get("blueScore"),
-        )?;
+        let current = if from_blue + w >= sink_blue {
+            js_bigint(
+                node.query("getSinkBlueScore", json!({}))
+                    .await?
+                    .get("blueScore"),
+            )?
+        } else {
+            sink_blue
+        };
         let want = from_blue + w;
         let min = if current > want { current - want } else { 0 };
         let r = node.query("getVirtualChainFromBlockV2", json!({"startHash": from, "dataVerbosityLevel": "High", "minConfirmationCount": min as u64})).await?;

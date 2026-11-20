@@ -333,7 +333,6 @@ impl RollingV1 {
         r.insert("redeemHex".into(), json!(hex(&redeem_bytes)));
         r.insert("state".into(), state.to_json());
         r.insert("frozen".into(), json!([]));
-        r.insert("preimages".into(), json!({}));
         r.insert("ownerKey".into(), json!(state.owner_key));
         r.insert(
             "settings".into(),
@@ -372,8 +371,8 @@ impl RollingV1 {
         r.insert("bought".into(), json!(0));
         r.insert("fees".into(), json!(genesis_fee.to_string()));
         r.insert(
-            "receipts".into(),
-            json!([{
+            "_deltaReceipt".into(),
+            json!({
                 "txid": txid,
                 "action": "GENESIS",
                 "accepted": true,
@@ -382,7 +381,7 @@ impl RollingV1 {
                 "acceptingBlock": b.hash,
                 "acceptingDaa": b.daa,
                 "feeSompi": genesis_fee.to_string(),
-            }]),
+            }),
         );
         let _ = &self.scope;
         Ok(Some(Value::Object(r)))
@@ -513,21 +512,24 @@ impl RollingV1 {
             res.terminal.clone().map(|x| json!(x)).unwrap_or(Value::Null),
         );
 
-        let mut preimages = match next.shift_remove("preimages") {
-            Some(Value::Object(m)) => m,
-            _ => serde_json::Map::new(),
-        };
-        for (h, raw) in &res.frozen_outputs {
-            preimages.insert(h.clone(), json!(hex(raw)));
-        }
+        let mut delta_preimages: Vec<(String, String)> = res
+            .frozen_outputs
+            .iter()
+            .map(|(h, raw)| (h.clone(), hex(raw)))
+            .collect();
 
         // Update counters (buys, bought, fees, step, receipts).
         let old_step = next.get("step").and_then(|v| v.as_u64()).unwrap_or(1);
         next.insert("step".into(), json!(old_step + 1));
         let old_fees = js_bigint(next.get("fees")).unwrap_or(0);
         next.insert("fees".into(), json!((old_fees + res.fee).to_string()));
+        let w0 = if matches!(res.action, Action::Buy | Action::Draw) {
+            decode_spend(&tx.inputs[0].signature_script, &self.profile).ok()
+        } else {
+            None
+        };
         if res.action == Action::Buy
-            && let Ok(w) = decode_spend(&tx.inputs[0].signature_script, &self.profile)
+            && let Some(ref w) = w0
             && let Some(R::SpendArg::Bytes(d)) = w.args.get("data")
             && d.len() >= 4
         {
@@ -537,25 +539,23 @@ impl RollingV1 {
             next.insert("buys".into(), json!(buys + 1));
             next.insert("bought".into(), json!(bought + q as u64));
         }
-        let mut receipts = match next.shift_remove("receipts") {
-            Some(Value::Array(a)) => a,
-            _ => Vec::new(),
-        };
-        receipts.push(json!({
-            "txid": txid_str,
-            "action": res.action.as_str(),
-            "accepted": true,
-            "candidate": false,
-            "finalized": true,
-            "acceptingBlock": b.hash,
-            "acceptingDaa": b.daa,
-            "feeSompi": res.fee.to_string(),
-        }));
-        next.insert("receipts".into(), Value::Array(receipts));
+        next.insert(
+            "_deltaReceipt".into(),
+            json!({
+                "txid": txid_str,
+                "action": res.action.as_str(),
+                "accepted": true,
+                "candidate": false,
+                "finalized": true,
+                "acceptingBlock": b.hash,
+                "acceptingDaa": b.daa,
+                "feeSompi": res.fee.to_string(),
+            }),
+        );
 
         // Preserve any frozen preimage and draw metadata if DRAW revealed a winning preimage.
         if res.action == Action::Draw
-            && let Ok(w) = decode_spend(&tx.inputs[0].signature_script, &self.profile)
+            && let Some(ref w) = w0
             && let Some(R::SpendArg::Bytes(d)) = w.args.get("data")
             && d.len() >= 244
         {
@@ -566,7 +566,7 @@ impl RollingV1 {
                     .unwrap_or(false)
                 {
                     let h = hex(&blake2b256(raw));
-                    preimages.insert(h, json!(hex(raw)));
+                    delta_preimages.push((h, hex(raw)));
                 }
             }
             if let Some(acc) = accessor
@@ -601,10 +601,10 @@ impl RollingV1 {
                 .indices
                 .iter()
                 .map(|idx| {
-                    let recs = preimages
-                        .get(&idx.hash)
-                        .and_then(|v| v.as_str())
-                        .and_then(|h| unhex(h).ok())
+                    let recs = delta_preimages
+                        .iter()
+                        .find(|(h, _)| h == &idx.hash)
+                        .and_then(|(_, rh)| unhex(rh).ok())
                         .and_then(|raw| identify(&raw, &self.profile).ok())
                         .map(|fs| {
                             Value::Array(
@@ -637,7 +637,17 @@ impl RollingV1 {
                 }),
             );
         }
-        next.insert("preimages".into(), Value::Object(preimages));
+        if !delta_preimages.is_empty() {
+            next.insert(
+                "_deltaPreimages".into(),
+                Value::Array(
+                    delta_preimages
+                        .into_iter()
+                        .map(|(h, rh)| json!([h, rh]))
+                        .collect(),
+                ),
+            );
+        }
 
         let mut frozen_list: Vec<Value> = next
             .get("frozen")
@@ -707,6 +717,42 @@ impl RollingV1 {
     }
 }
 
+/// Fill `history.shards[*].records` at PAID/REFUNDED terminal using stored `round_preimages`.
+pub fn fill_terminal_history_preimages(
+    next: &mut Value,
+    preimages: &serde_json::Map<String, Value>,
+) {
+    let Some(shards) = next
+        .get_mut("history")
+        .and_then(|h| h.get_mut("shards"))
+        .and_then(|s| s.as_array_mut())
+    else {
+        return;
+    };
+    let Ok(profile) = pinned_profile() else {
+        return;
+    };
+    for shard in shards {
+        if !shard.get("records").is_none_or(|r| r.is_null()) {
+            continue;
+        }
+        let Some(hash) = shard.get("hash").and_then(|h| h.as_str()) else {
+            continue;
+        };
+        if let Some(rh) = preimages.get(hash).and_then(|v| v.as_str())
+            && let Ok(raw) = unhex(rh)
+            && let Ok(fs) = identify(&raw, &profile)
+        {
+            shard["records"] = Value::Array(
+                fs.records
+                    .iter()
+                    .map(|rec| json!({"end": rec.end, "key": rec.key}))
+                    .collect(),
+            );
+        }
+    }
+}
+
 /// Build `roundText` (tagged JSON compatible with `web/rolling-tn10/codec.mjs`) and `historicalShards`.
 pub fn export_round_text(d: &Value, virtual_daa: Option<&str>) -> Result<(String, Value)> {
     export_round_text_for_network(d, virtual_daa, "testnet-10")
@@ -717,17 +763,47 @@ pub fn export_round_text_for_network(
     virtual_daa: Option<&str>,
     network_id: &str,
 ) -> Result<(String, Value)> {
-    let cid = d.get("cid").and_then(|v| v.as_str()).unwrap_or("");
-    let terminal = d.get("terminal").cloned().unwrap_or(Value::Null);
-    let utxo_daa = d.get("utxoDaa").and_then(|v| v.as_str()).unwrap_or("0");
-    let current_daa = match virtual_daa {
-        Some(v) if v.parse::<u64>().unwrap_or(0) > utxo_daa.parse::<u64>().unwrap_or(0) => v,
-        _ => utxo_daa,
-    };
-    let settings = &d["settings"];
-    let preimages = d.get("preimages").and_then(|v| v.as_object());
+    export_round_text_for_network_owned(&mut d.clone(), virtual_daa, network_id)
+}
 
-    let manager = if terminal.is_null() && d.get("tip").is_some_and(|t| !t.is_null()) {
+fn pack_receipt(rc: Value) -> Value {
+    let Value::Object(mut o) = rc else {
+        return rc;
+    };
+    if o.get("finalized").and_then(|v| v.as_bool()) == Some(false) {
+        return Value::Object(o);
+    }
+    let Some(txid) = o.shift_remove("txid") else {
+        return Value::Object(o);
+    };
+    let Some(action) = o.shift_remove("action") else {
+        o.insert("txid".into(), txid);
+        return Value::Object(o);
+    };
+    let fee = o.shift_remove("feeSompi").unwrap_or_else(|| json!("0"));
+    if action.as_str() == Some("BUY") {
+        return Value::Array(vec![txid, fee]);
+    }
+    match o.shift_remove("acceptingBlock") {
+        Some(Value::String(b)) if !b.is_empty() => {
+            Value::Array(vec![txid, action, fee, Value::String(b)])
+        }
+        _ => Value::Array(vec![txid, action, fee]),
+    }
+}
+
+fn build_tagged_manager(
+    d: &Value,
+    cid: &str,
+    terminal: &Value,
+    utxo_daa: &str,
+    virtual_daa: Option<&str>,
+) -> Value {
+    if terminal.is_null() && d.get("tip").is_some_and(|t| !t.is_null()) {
+        let current_daa = match virtual_daa {
+            Some(v) if v.parse::<u64>().unwrap_or(0) > utxo_daa.parse::<u64>().unwrap_or(0) => v,
+            _ => utxo_daa,
+        };
         let redeem_hex = d.get("redeemHex").and_then(|v| v.as_str()).unwrap_or("");
         json!({
             "outpoint": d["tip"],
@@ -741,7 +817,85 @@ pub fn export_round_text_for_network(
         })
     } else {
         Value::Null
+    }
+}
+
+pub fn export_round_delta(
+    d: &Value,
+    virtual_daa: Option<&str>,
+    new_receipts: Vec<Value>,
+    new_preimages: Map<String, Value>,
+) -> Value {
+    let cid = d.get("cid").and_then(|v| v.as_str()).unwrap_or("");
+    let terminal = d.get("terminal").cloned().unwrap_or(Value::Null);
+    let utxo_daa = d.get("utxoDaa").and_then(|v| v.as_str()).unwrap_or("0");
+    let manager = build_tagged_manager(d, cid, &terminal, utxo_daa, virtual_daa);
+    let frozen_arr: Vec<Value> = if manager.is_null() {
+        vec![]
+    } else {
+        d.get("frozen")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .map(|f| {
+                        let f_daa = f
+                            .get("utxoDaa")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or(utxo_daa);
+                        json!({
+                            "outpoint": f["outpoint"],
+                            "value": {"$bigint": js_string(f.get("value"))},
+                            "utxoDaa": {"$bigint": f_daa},
+                            "spk": f["spk"],
+                            "cid": cid,
+                            "scriptHash": f["scriptHash"],
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
     };
+    let packed_receipts: Vec<Value> = new_receipts.into_iter().map(pack_receipt).collect();
+    let mut delta = Map::new();
+    delta.insert("manager".into(), manager);
+    delta.insert("frozen".into(), Value::Array(frozen_arr));
+    delta.insert("newPreimages".into(), Value::Object(new_preimages));
+    delta.insert("accepting".into(), d["accepting"].clone());
+    delta.insert("step".into(), d.get("step").cloned().unwrap_or(json!(1)));
+    delta.insert("buys".into(), d.get("buys").cloned().unwrap_or(json!(0)));
+    delta.insert("bought".into(), d.get("bought").cloned().unwrap_or(json!(0)));
+    delta.insert(
+        "fees".into(),
+        json!({"$bigint": d.get("fees").and_then(|v| v.as_str()).unwrap_or("0")}),
+    );
+    delta.insert("terminal".into(), terminal);
+    delta.insert("receipts".into(), Value::Array(packed_receipts));
+    if let Some(draw) = d.get("draw").filter(|v| !v.is_null()) {
+        delta.insert("draw".into(), draw.clone());
+    }
+    Value::Object(delta)
+}
+
+pub fn export_round_text_for_network_owned(
+    d: &mut Value,
+    virtual_daa: Option<&str>,
+    network_id: &str,
+) -> Result<(String, Value)> {
+    let receipts = match d
+        .as_object_mut()
+        .and_then(|o| o.shift_remove("receipts"))
+    {
+        Some(Value::Array(arr)) => Value::Array(arr.into_iter().map(pack_receipt).collect()),
+        Some(v) => v,
+        None => json!([]),
+    };
+    let cid = d.get("cid").and_then(|v| v.as_str()).unwrap_or("");
+    let terminal = d.get("terminal").cloned().unwrap_or(Value::Null);
+    let utxo_daa = d.get("utxoDaa").and_then(|v| v.as_str()).unwrap_or("0");
+    let settings = &d["settings"];
+    let preimages = d.get("preimages").and_then(|v| v.as_object());
+
+    let manager = build_tagged_manager(d, cid, &terminal, utxo_daa, virtual_daa);
 
     let frozen_arr: Vec<Value> = if manager.is_null() {
         vec![]
@@ -797,11 +951,9 @@ pub fn export_round_text_for_network(
         "fees".into(),
         json!({"$bigint": d.get("fees").and_then(|v| v.as_str()).unwrap_or("0")}),
     );
+    let need_shards = !terminal.is_null() && terminal.as_str() != Some("EMPTY");
     tagged.insert("terminal".into(), terminal);
-    tagged.insert(
-        "receipts".into(),
-        d.get("receipts").cloned().unwrap_or(json!([])),
-    );
+    tagged.insert("receipts".into(), receipts);
     tagged.insert("pending".into(), json!([]));
     tagged.insert("halted".into(), Value::Null);
     tagged.insert("source".into(), json!("imported"));
@@ -813,17 +965,22 @@ pub fn export_round_text_for_network(
         tagged.insert("history".into(), history.clone());
     }
 
-    let round_text = format!("{}\n", serde_json::to_string_pretty(&Value::Object(tagged))?);
+    let round_text = serde_json::to_string(&Value::Object(tagged))?;
 
-    let shards: Vec<Value> = preimages
-        .map(|m| {
-            m.iter()
-                .filter_map(|(h, v)| {
-                    v.as_str().map(|rh| json!({"hash": h, "redeemHex": rh}))
-                })
-                .collect()
-        })
-        .unwrap_or_default();
+    let historical_shards = if need_shards {
+        let shards: Vec<Value> = preimages
+            .map(|m| {
+                m.iter()
+                    .filter_map(|(h, v)| {
+                        v.as_str().map(|rh| json!({"hash": h, "redeemHex": rh}))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        json!({"shards": shards})
+    } else {
+        Value::Null
+    };
 
-    Ok((round_text, json!({"shards": shards})))
+    Ok((round_text, historical_shards))
 }

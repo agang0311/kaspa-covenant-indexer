@@ -28,6 +28,7 @@ pub struct Api {
     pub contracts_path: Option<String>,
     pub started: Instant,
     pub mutations: tokio::sync::Mutex<()>,
+    pub export_cache: std::sync::Mutex<Option<((String, String, i64), axum::body::Bytes)>>,
 }
 impl Api {
     pub fn pick(&self, key: Option<&str>) -> Option<Arc<View>> {
@@ -254,7 +255,7 @@ async fn dispatch(api: &Arc<Api>, req: Request) -> Result<Response> {
     let virtual_daa = cp.as_ref().map(|c| c.virtual_daa.as_str());
     if let Some((pid, rest)) = rolling_route {
         let rest_ref: Vec<&str> = rest.iter().map(String::as_str).collect();
-        return rolling_api(&view, &pid, &rest_ref, &query, virtual_daa, cp.as_ref());
+        return rolling_api(api, &view, &pid, &rest_ref, &query, virtual_daa, cp.as_ref());
     }
     if let Some(sub_v1) = route.strip_prefix("/v1/") {
         let rest_ref: Vec<&str> = sub_v1.split('/').filter(|s| !s.is_empty()).collect();
@@ -263,6 +264,7 @@ async fn dispatch(api: &Arc<Api>, req: Request) -> Result<Response> {
             Some("info" | "rounds" | "txid")
         ) {
             return rolling_api(
+                api,
                 &view,
                 crate::contracts::rolling_v1::PROFILE_ID,
                 &rest_ref,
@@ -756,6 +758,7 @@ async fn update_config(api: &Arc<Api>, sub: &str, body: &Value) -> Result<Respon
 
 /// Rolling v1 public read endpoints (`/info`, `/rounds`, `/rounds/{cid}`, `/rounds/{cid}/history`, `/rounds/{cid}/export`, `/txid/{txid}`).
 fn rolling_api(
+    api: &Api,
     view: &View,
     profile_id: &str,
     rest_ref: &[&str],
@@ -1024,34 +1027,168 @@ fn rolling_api(
                 return Ok(response(400, json!({"detail":"INVALID_CID"})));
             }
             let rows = db.by_cid(cid)?;
-            let Some(r) = rows.into_iter().find(is_rolling) else {
+            let Some(mut r) = rows.into_iter().find(is_rolling) else {
                 return Ok(response(404, json!({"detail":"NOT_FOUND"})));
             };
+            let revision = db.transition_count(&r.id)?;
+            let head = json!({
+                "txid": r.data["latestTxid"],
+                "acceptingBlock": r.data["accepting"],
+                "acceptingDaa": r.data["utxoDaa"],
+            });
+
+            let since_txid = query
+                .iter()
+                .find(|(k, _)| k == "sinceTxid")
+                .map(|(_, v)| v.as_str())
+                .filter(|s| is_hash(s));
+            let since_step_raw = query
+                .iter()
+                .find(|(k, _)| k == "sinceStep")
+                .map(|(_, v)| v.as_str());
+            let since_step = since_step_raw.and_then(|s| s.parse::<u64>().ok());
+            let step_param_ok = since_step_raw.is_none() || since_step.is_some();
+
+            if let Some(stx) = since_txid
+                && step_param_ok
+            {
+                let current_step = r.data.get("step").and_then(|v| v.as_u64()).unwrap_or(0);
+                if r.data.get("latestTxid").and_then(|v| v.as_str()) == Some(stx)
+                    && since_step.is_none_or(|ss| ss == current_step)
+                {
+                    return Ok(response(
+                        200,
+                        json!({
+                            "schema": 1,
+                            "network": view.net().network_id,
+                            "genesisHash": view.net().genesis,
+                            "profileId": profile_id,
+                            "cid": cid,
+                            "mode": "unchanged",
+                            "revision": revision.to_string(),
+                            "head": head,
+                        }),
+                    ));
+                }
+
+                if let Some(anchor_tr) = db.active_transition(&r.id, stx)? {
+                    let receipt_seq = if db
+                        .round_receipt_txid_at(&r.id, anchor_tr.seq)?
+                        .as_deref()
+                        == Some(stx)
+                    {
+                        Some(anchor_tr.seq)
+                    } else if anchor_tr.seq > 0
+                        && db
+                            .round_receipt_txid_at(&r.id, anchor_tr.seq - 1)?
+                            .as_deref()
+                            == Some(stx)
+                    {
+                        Some(anchor_tr.seq - 1)
+                    } else {
+                        None
+                    };
+
+                    if let Some(rseq) = receipt_seq {
+                        let anchor_count = db.round_receipt_count_up_to(&r.id, rseq)?;
+                        if anchor_count >= 0
+                            && (anchor_count as u64) < current_step
+                            && since_step.is_none_or(|ss| ss == anchor_count as u64)
+                        {
+                            let new_receipts = db.round_receipts_after(&r.id, rseq)?;
+                            let new_preimages =
+                                db.round_preimages_after(&r.id, anchor_tr.seq)?;
+                            let delta = crate::contracts::rolling_v1::export_round_delta(
+                                &r.data,
+                                virtual_daa,
+                                new_receipts,
+                                new_preimages,
+                            );
+                            return Ok(response(
+                                200,
+                                json!({
+                                    "schema": 1,
+                                    "network": view.net().network_id,
+                                    "genesisHash": view.net().genesis,
+                                    "profileId": profile_id,
+                                    "cid": cid,
+                                    "mode": "delta",
+                                    "revision": revision.to_string(),
+                                    "head": head,
+                                    "base": {
+                                        "txid": stx,
+                                        "step": anchor_count,
+                                    },
+                                    "delta": delta,
+                                }),
+                            ));
+                        }
+                    }
+                } else if since_step.is_some_and(|ss| ss > current_step)
+                    && !db.has_rolled_back_transition(&r.id, stx)?
+                {
+                    return Ok(response(
+                        200,
+                        json!({
+                            "schema": 1,
+                            "network": view.net().network_id,
+                            "genesisHash": view.net().genesis,
+                            "profileId": profile_id,
+                            "cid": cid,
+                            "mode": "ahead",
+                            "revision": revision.to_string(),
+                            "head": head,
+                            "step": current_step,
+                        }),
+                    ));
+                }
+            }
+
+            let cache_key = (view.net().key.to_string(), cid.to_string(), revision);
+            if let Some((k, bytes)) = api.export_cache.lock().unwrap().as_ref()
+                && k == &cache_key
+            {
+                return Ok((
+                    StatusCode::OK,
+                    [("content-type", "application/json; charset=utf-8")],
+                    bytes.clone(),
+                )
+                    .into_response());
+            }
+            if let Some(obj) = r.data.as_object_mut() {
+                if !obj.contains_key("receipts") {
+                    obj.insert("receipts".into(), Value::Array(db.round_receipts(&r.id)?));
+                }
+                if !obj.contains_key("preimages") {
+                    obj.insert("preimages".into(), Value::Object(db.round_preimages(&r.id)?));
+                }
+            }
             let (round_text, historical_shards) =
-                crate::contracts::rolling_v1::export_round_text_for_network(
-                    &r.data,
+                crate::contracts::rolling_v1::export_round_text_for_network_owned(
+                    &mut r.data,
                     virtual_daa,
                     view.net().network_id,
                 )?;
-            let revision = db.transition_count(&r.id)?;
-            Ok(response(
-                200,
-                json!({
-                    "schema": 1,
-                    "network": view.net().network_id,
-                    "genesisHash": view.net().genesis,
-                    "profileId": profile_id,
-                    "cid": cid,
-                    "revision": revision.to_string(),
-                    "head": {
-                        "txid": r.data["latestTxid"],
-                        "acceptingBlock": r.data["accepting"],
-                        "acceptingDaa": r.data["utxoDaa"],
-                    },
-                    "roundText": round_text,
-                    "historicalShards": historical_shards,
-                }),
-            ))
+            let body = json!({
+                "schema": 1,
+                "network": view.net().network_id,
+                "genesisHash": view.net().genesis,
+                "profileId": profile_id,
+                "cid": cid,
+                "mode": "full",
+                "revision": revision.to_string(),
+                "head": head,
+                "roundText": round_text,
+                "historicalShards": historical_shards,
+            });
+            let bytes = axum::body::Bytes::from(serde_json::to_vec(&body)?);
+            *api.export_cache.lock().unwrap() = Some((cache_key, bytes.clone()));
+            Ok((
+                StatusCode::OK,
+                [("content-type", "application/json; charset=utf-8")],
+                bytes,
+            )
+                .into_response())
         }
         ["txid", txid] => {
             if !is_hash(txid) {

@@ -103,19 +103,14 @@ impl Pool {
             let op = op.clone();
             Box::pin(async move {
                 let (n, _events) = op(url).await?;
-                let mut rtts = vec![];
-                let mut blue = 0;
-                for _ in 0..3 {
-                    let start = Instant::now();
-                    let r = n.call("getSinkBlueScore", json!({})).await?;
-                    blue = u64::try_from(js_bigint(r.get("blueScore"))?)?;
-                    rtts.push(start.elapsed().as_millis() as u64);
-                }
-                rtts.sort();
+                let start = Instant::now();
+                let r = n.call("getSinkBlueScore", json!({})).await?;
+                let blue = u64::try_from(js_bigint(r.get("blueScore"))?)?;
+                let rtt_ms = start.elapsed().as_millis() as u64;
                 let p = Probe {
                     p2p_id: n.p2p_id(),
                     blue_score: blue,
-                    rtt_ms: rtts[1],
+                    rtt_ms,
                 };
                 n.close();
                 Ok(p)

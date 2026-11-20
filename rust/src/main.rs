@@ -311,6 +311,7 @@ async fn main() -> Result<()> {
         contracts_path: cli.contracts,
         started: Instant::now(),
         mutations: tokio::sync::Mutex::new(()),
+        export_cache: std::sync::Mutex::new(None),
     });
     let listener = tokio::net::TcpListener::bind((cli.api_host.as_str(), cli.api_port)).await?;
     log::log(
