@@ -37,19 +37,20 @@ pub const SHARD_VAULT_DEPOSIT: i128 = 200_000_000;
 pub const SHARD_TOTAL_DEPOSIT: i128 = SHARD_LEDGER_DEPOSIT + SHARD_VAULT_DEPOSIT;
 pub const WINNER_CARRIER_MIN: i128 = 150_000_000;
 pub const PRICE_MIN: i128 = 1_000_000;
+pub const TOKEN_AMOUNT_LIMIT: i128 = 1_000_000_000_000_000_000;
 pub const EXECUTOR_REWARD: i128 = 500_000;
 pub const FEE_CAP: i128 = 50_000_000;
 
 pub const ZERO32: &str = "0000000000000000000000000000000000000000000000000000000000000000";
 
 /// Frozen template hashes from `contracts/kusdt-v2/artifacts/template-pins.json` (`MAX_BATCH=8`).
-pub const M_OPEN_HASH: &str = "559e67acf808e5d48283421e01ac7dc3134d91109f09ac1257324fa85feb8f2a";
-pub const M_SEALED_HASH: &str = "e987429ff1ee8d5905fe6dc7c7a01ea5747f7e036d26d2a2e37e35c6d031f20f";
-pub const M_DISPATCH_HASH: &str = "c19b021080e31fd1408bd7aa7455cf11cfd4324d1cae0d94dd8ce6139db00050";
-pub const S_OPEN_HASH: &str = "30213f2234df0b1f67794ef5b8fd6e91f144a3d745ffa282d679218ac52165fc";
-pub const S_FROZEN_HASH: &str = "5f6a591bd11fc5d4f873ab17aa94cc5b41e688ff7b9bae34e157dd5f86dfc76a";
+pub const M_OPEN_HASH: &str = "39a29f4e215a2d264aa1dad63ec61b41633c7ff3822fe8e8c6d888b32d2e5445";
+pub const M_SEALED_HASH: &str = "3e07af22007701e0c41d42f5a6bef38eb999c5079d5c3673f9617e04dc1b770c";
+pub const M_DISPATCH_HASH: &str = "529a66a41b1a277e57162d9dadaf3ffe49538b83cfff9adcd874286ed6ba3fba";
+pub const S_OPEN_HASH: &str = "3d5ce67b7a302d18a63a824e16056b27ec549350db9a50c7f7d00587416a256f";
+pub const S_FROZEN_HASH: &str = "dce727e1cb4a6d9ddc421d65d87af54becaff2234861ea3d356894e5d7456c62";
 pub const S_PAYOUT_HASH: &str = "d9c495e42d7730616441e05335ab8e30a742e7004e67f467ad4498111452e950";
-pub const S_REFUND_HASH: &str = "63f0f28aee985e1b3393c3722de1cbf1c4bec8eb565de75ee5125165c9a79983";
+pub const S_REFUND_HASH: &str = "adf4eb35939f240a77de7f7ac0700b9116dca627452056523b8c63e2fd63cf16";
 
 #[derive(Clone, Debug)]
 pub struct TemplateHashes {
@@ -574,7 +575,7 @@ pub fn identify_redeem(raw: &[u8], hashes: &TemplateHashes) -> Result<(ContractS
     Ok((st, tail))
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum WitnessArg {
     Int(i64),
     Bytes(Vec<u8>),
@@ -592,6 +593,8 @@ fn spend_abi_spec(stage: Stage) -> &'static [(&'static str, &'static str)] {
     match stage {
         Stage::MOpen => &[
             ("action", "int"),
+            ("originTxId", "bytes"),
+            ("originIndex", "int"),
             ("ownTailBytes", "int"),
             ("shardTail", "bytes"),
             ("extraBytes", "bytes"),
@@ -722,7 +725,12 @@ pub fn decode_genesis_payload(payload_hex: &str, expected_profile_id: &str) -> R
             && h.decision == Decision::Undecided
             && h.reserved == 0
             && h.price >= PRICE_MIN
-            && h.close_daa > 0,
+            && h.price <= TOKEN_AMOUNT_LIMIT / 2
+            && h.close_daa > 0
+            && h.close_daa < 500_000_000_000 - REROLL_TIMEOUT_DAA
+            && st.entries.is_empty()
+            && st.winner_pk.is_none()
+            && st.shard_cids.is_empty(),
         "KUSDT_V2_GENESIS_INITIAL_STATE",
     )?;
     Ok(st)
@@ -1075,7 +1083,7 @@ mod tests {
     #[test]
     fn embedded_m_open_tail_and_genesis_payload_verify() {
         let tail = pinned_m_open_tail().unwrap();
-        assert_eq!(tail.len(), 8688);
+        assert_eq!(tail.len(), 8796);
         let init = ManagerState {
             header: ManagerHeader {
                 stage: Stage::MOpen,
@@ -1102,6 +1110,78 @@ mod tests {
         assert_eq!(payload.len(), 115);
         let decoded = decode_genesis_payload(&hex(&payload), M_OPEN_HASH).unwrap();
         assert_eq!(decoded, init);
+
+        // Reject price > TOKEN_AMOUNT_LIMIT / 2
+        let mut bad_price = init.clone();
+        bad_price.header.price = TOKEN_AMOUNT_LIMIT / 2 + 1;
+        let mut bad_payload = Vec::new();
+        bad_payload.extend_from_slice(GENESIS_PAYLOAD_MAGIC);
+        bad_payload.extend_from_slice(&unhex_len(M_OPEN_HASH, 32).unwrap());
+        bad_payload.extend_from_slice(&encode_manager_state(&bad_price).unwrap());
+        assert!(decode_genesis_payload(&hex(&bad_payload), M_OPEN_HASH).is_err());
+
+        // Reject close_daa >= 500_000_000_000 - REROLL_TIMEOUT_DAA
+        let mut bad_daa = init.clone();
+        bad_daa.header.close_daa = 500_000_000_000 - REROLL_TIMEOUT_DAA;
+        let mut bad_daa_payload = Vec::new();
+        bad_daa_payload.extend_from_slice(GENESIS_PAYLOAD_MAGIC);
+        bad_daa_payload.extend_from_slice(&unhex_len(M_OPEN_HASH, 32).unwrap());
+        bad_daa_payload.extend_from_slice(&encode_manager_state(&bad_daa).unwrap());
+        assert!(decode_genesis_payload(&hex(&bad_daa_payload), M_OPEN_HASH).is_err());
+
+        // Verify M_OPEN 7-arg spend decoding (9 pushes, data at pushes[6])
+        let redeem = script_for(&state_bytes, &tail).unwrap();
+        let push_b = |out: &mut Vec<u8>, data: &[u8]| {
+            if data.is_empty() {
+                out.push(0x00);
+            } else if data.len() <= 75 {
+                out.push(data.len() as u8);
+                out.extend_from_slice(data);
+            } else if data.len() <= 255 {
+                out.push(0x4c);
+                out.push(data.len() as u8);
+                out.extend_from_slice(data);
+            } else {
+                out.push(0x4d);
+                out.extend_from_slice(&(data.len() as u16).to_le_bytes());
+                out.extend_from_slice(data);
+            }
+        };
+        let push_i = |out: &mut Vec<u8>, n: i64| {
+            if n == 0 {
+                out.push(0x00);
+            } else if (1..=16).contains(&n) {
+                out.push(0x50 + n as u8);
+            } else {
+                let mut v = n as u64;
+                let mut buf = Vec::new();
+                while v > 0 {
+                    buf.push((v & 0xff) as u8);
+                    v >>= 8;
+                }
+                if (buf.last().copied().unwrap_or(0) & 0x80) != 0 {
+                    buf.push(0x00);
+                }
+                push_b(out, &buf);
+            }
+        };
+        let mut sig = Vec::new();
+        push_i(&mut sig, 1); // action = OPEN_SHARD
+        push_b(&mut sig, &vec![0xaa; 32]); // originTxId
+        push_i(&mut sig, 0); // originIndex
+        push_i(&mut sig, tail.len() as i64); // ownTailBytes
+        push_b(&mut sig, &[0x51, 0x52]); // shardTail
+        push_b(&mut sig, &[0x53]); // extraBytes
+        let data_arg = vec![0x02, 0x00, 0x00, 0x00];
+        push_b(&mut sig, &data_arg); // pushes[6] = data
+        push_i(&mut sig, 0); // selector
+        push_b(&mut sig, &redeem); // raw_redeem
+        let w = decode_spend(&hex(&sig), &TemplateHashes::default()).unwrap();
+        assert_eq!(w.state.stage(), Stage::MOpen);
+        assert_eq!(w.args.get("action"), Some(&WitnessArg::Int(1)));
+        assert_eq!(w.args.get("originTxId"), Some(&WitnessArg::Bytes(vec![0xaa; 32])));
+        assert_eq!(w.args.get("originIndex"), Some(&WitnessArg::Int(0)));
+        assert_eq!(w.args.get("data"), Some(&WitnessArg::Bytes(data_arg)));
     }
 
     #[test]

@@ -590,8 +590,14 @@ impl KusdtV2 {
                         let (decoded_shard, _) = identify_redeem(&shard_redeem, &self.hashes)?;
                         check(decoded_shard.stage() == Stage::SOpen, "OPEN_SHARD_TEMPLATE")?;
                         let shard_spk = redeem_p2sh(&shard_redeem)?;
+                        let auth_idx_raw = tx.outputs[1]
+                            .cov_auth
+                            .ok_or_else(|| anyhow!("SHARD_AUTHORIZING_INPUT"))?;
+                        let auth_idx = usize::try_from(auth_idx_raw)
+                            .map_err(|_| anyhow!("SHARD_AUTHORIZING_INPUT"))?;
+                        check(auth_idx < tx.inputs.len(), "SHARD_AUTHORIZING_INPUT")?;
                         let shard_cid = shard_genesis_cid(
-                            &tx.inputs[1].previous_outpoint,
+                            &tx.inputs[auth_idx].previous_outpoint,
                             1,
                             &s_open_state,
                             shard_tail,
