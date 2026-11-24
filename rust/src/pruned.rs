@@ -371,8 +371,15 @@ impl Engine {
         };
         let blue = js_bigint(Some(blue))?;
         let mut lock_times = vec![0];
-        if let Ok(c) = js_bigint(rec.data.pointer("/state/config/closeEligibleDaa")) {
-            lock_times.extend([c - 1, c]);
+        if let Ok(c) = js_bigint(
+            rec.data
+                .pointer("/state/config/closeEligibleDaa")
+                .or_else(|| rec.data.pointer("/settings/closeEligibleDaa")),
+        ) {
+            if c > 0 {
+                lock_times.push(c - 1);
+            }
+            lock_times.push(c);
         }
         let Some(mut tx) = rebuild(&raw, txid, &lock_times)? else {
             return self.pruned_miss(rec, txid, "TXID_NOT_REPRODUCED", json!({}));

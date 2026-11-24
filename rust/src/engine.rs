@@ -431,12 +431,8 @@ impl Engine {
             }
         }
         let mut addrs: Vec<String> = c.watch_addresses();
-        for (_id, _contract, address, status) in &all {
-            if status == "LIVE"
-                && let Some(a) = address.as_ref().filter(|a| !a.is_empty())
-            {
-                addrs.push(a.clone());
-            }
+        for r in self.store.db().rounds(true, false)? {
+            addrs.extend(Self::unique_addrs(&self.round_active_targets(&r)));
         }
         self.subscribe_many(&addrs).await?;
         self.initialize_discovery_scan().await?;
@@ -533,16 +529,120 @@ impl Engine {
         Ok(())
     }
 
+    pub async fn unsubscribe_many(&self, addresses: &[String]) -> Result<()> {
+        let mut last_addrs = Vec::new();
+        {
+            let mut s = self.subs.lock().unwrap();
+            for a in addresses {
+                if a.is_empty() {
+                    continue;
+                }
+                let n = s.get(a).copied().unwrap_or(0);
+                if n <= 1 {
+                    s.shift_remove(a);
+                    if n == 1 {
+                        last_addrs.push(a.clone());
+                    }
+                } else {
+                    s.insert(a.clone(), n - 1);
+                }
+            }
+        }
+        if !last_addrs.is_empty() {
+            self.node.unsubscribe_utxos(&last_addrs).await?;
+        }
+        Ok(())
+    }
+
+    fn data_active_targets(
+        &self,
+        contract: Option<&str>,
+        data: &Value,
+        fallback_address: Option<&str>,
+    ) -> Vec<crate::contracts::kusdt_v2::ActiveUtxoTarget> {
+        if contract.is_some_and(|c| c.starts_with("kusdt-v2@")) {
+            return crate::contracts::kusdt_v2::active_watch_targets(
+                data,
+                self.net.address_prefix,
+            );
+        }
+        if !truthy(data.get("tip")) {
+            return Vec::new();
+        }
+        let addr = fallback_address
+            .filter(|a| !a.is_empty())
+            .map(str::to_string)
+            .or_else(|| self.addr_of(&data["spk"]).ok())
+            .unwrap_or_default();
+        if addr.is_empty() {
+            return Vec::new();
+        }
+        vec![crate::contracts::kusdt_v2::ActiveUtxoTarget {
+            outpoint: data["tip"].clone(),
+            spk: data["spk"].clone(),
+            address: addr,
+            utxo_daa: data
+                .get("utxoDaa")
+                .and_then(|v| v.as_str())
+                .map(str::to_string),
+            value: data.get("value").and_then(|v| v.as_str()).map(str::to_string),
+            is_manager: true,
+            shard_cid: None,
+        }]
+    }
+
+    fn round_active_targets(
+        &self,
+        rec: &RoundRow,
+    ) -> Vec<crate::contracts::kusdt_v2::ActiveUtxoTarget> {
+        self.data_active_targets(rec.contract.as_deref(), &rec.data, rec.address.as_deref())
+    }
+
+    fn unique_addrs(targets: &[crate::contracts::kusdt_v2::ActiveUtxoTarget]) -> Vec<String> {
+        let mut out = Vec::new();
+        for t in targets {
+            if !t.address.is_empty() && !out.contains(&t.address) {
+                out.push(t.address.clone());
+            }
+        }
+        out
+    }
+
+    fn diff_subscription_addrs(old: &[String], new: &[String]) -> (Vec<String>, Vec<String>) {
+        let to_sub = new.iter().filter(|a| !old.contains(a)).cloned().collect();
+        let to_unsub = old.iter().filter(|a| !new.contains(a)).cloned().collect();
+        (to_sub, to_unsub)
+    }
+
+    async fn query_present_outpoints(&self, addrs: &[String]) -> Result<HashSet<String>> {
+        let mut present = HashSet::new();
+        let mut unique = Vec::new();
+        for a in addrs {
+            if !a.is_empty() && !unique.contains(a) {
+                unique.push(a.clone());
+            }
+        }
+        for chunk in unique.chunks(64) {
+            let r = self
+                .q("getUtxosByAddresses", json!({ "addresses": chunk }))
+                .await?;
+            for raw in arr(r.get("entries")) {
+                let u = normalize_utxo(raw)?;
+                present.insert(outpoint_key(&u.outpoint));
+            }
+        }
+        Ok(present)
+    }
+
     // ---------- events ----------
     pub fn on_utxos_changed(self: &Arc<Self>, data: &Value) -> Result<()> {
         let at = now_ms();
-        let tips: HashMap<String, String> = self
-            .store
-            .db()
-            .rounds(true, false)?
-            .into_iter()
-            .map(|r| (outpoint_key(&r.data["tip"]), r.id))
-            .collect();
+        let mut tips: HashMap<String, String> = HashMap::new();
+        for r in self.store.db().rounds(true, false)? {
+            for t in self.round_active_targets(&r) {
+                tips.insert(outpoint_key(&t.outpoint), r.id.clone());
+            }
+        }
         for raw in arr(data.get("removed")) {
             let u = normalize_utxo(raw)?;
             if let Some(id) = tips.get(&outpoint_key(&u.outpoint)) {
@@ -1295,13 +1395,47 @@ impl Engine {
         if self.pruned_backoff(&key) {
             return Ok("PENDING".into());
         }
-        let tip = rec.data["tip"].clone();
-        let tip_daa = rec
-            .data
-            .get("utxoDaa")
-            .and_then(|v| v.as_str())
-            .and_then(|s| s.parse::<u64>().ok())
-            .unwrap_or(0);
+        let targets = self.round_active_targets(&rec);
+        if targets.is_empty() {
+            return Ok("NO_ACTIVE_TARGETS".into());
+        }
+        let (tip, tip_addr, tip_daa) = if targets.len() == 1 {
+            let t = &targets[0];
+            (
+                t.outpoint.clone(),
+                Some(t.address.clone()),
+                t.utxo_daa
+                    .as_deref()
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .unwrap_or(0),
+            )
+        } else {
+            let present = self
+                .query_present_outpoints(&Self::unique_addrs(&targets))
+                .await?;
+            if let Some(spent) = targets
+                .iter()
+                .find(|t| !present.contains(&outpoint_key(&t.outpoint)))
+            {
+                (
+                    spent.outpoint.clone(),
+                    Some(spent.address.clone()),
+                    spent
+                        .utxo_daa
+                        .as_deref()
+                        .and_then(|s| s.parse::<u64>().ok())
+                        .unwrap_or(0),
+                )
+            } else {
+                let observed = now_ms();
+                self.store.db().mark_live_seen(round_id, observed)?;
+                for t in &targets {
+                    self.mark_live_anchor(round_id, &t.outpoint, observed)?;
+                }
+                self.forget_pending(&key);
+                return Ok("STILL_LIVE".into());
+            }
+        };
         let cur_daa = self
             .store
             .db()
@@ -1394,12 +1528,12 @@ impl Engine {
         let mut candidates = if is_historical {
             vec![]
         } else {
-            self.from_mempool(rec.address.as_deref(), &tip, cid.as_deref())
+            self.from_mempool(tip_addr.as_deref(), &tip, cid.as_deref())
                 .await
         };
         if candidates.is_empty() && self.config.rest_url.is_some() {
             candidates = self
-                .from_rest(rec.address.as_deref(), &tip, cid.as_deref())
+                .from_rest(tip_addr.as_deref(), &tip, cid.as_deref())
                 .await;
         }
         let mut window_continues = false;
@@ -1459,7 +1593,7 @@ impl Engine {
         if candidates.is_empty() {
             let observed = now_ms();
             if self
-                .live_utxo(rec.address.as_deref(), &tip)
+                .live_utxo(tip_addr.as_deref(), &tip)
                 .await?
                 .is_some()
             {
@@ -1558,9 +1692,14 @@ impl Engine {
             hash: acc.hash.clone(),
             daa: acc.daa.to_string(),
         };
-        let accessor = if plugin.is_rolling()
-            && let Some(target_hash) = crate::contracts::rolling_v1::draw_target_hash(&chosen.tx)
-        {
+        let target_hash_opt = if plugin.is_rolling() {
+            crate::contracts::rolling_v1::draw_target_hash(&chosen.tx)
+        } else if plugin.is_kusdt_v2() {
+            crate::contracts::kusdt_v2::draw_target_hash(&chosen.tx)
+        } else {
+            None
+        };
+        let accessor = if let Some(target_hash) = target_hash_opt {
             let r = self
                 .q(
                     "getBlock",
@@ -1595,13 +1734,15 @@ impl Engine {
             Ok(n) => n,
             Err(e) => {
                 let r = self.mark_stale(rec, &chosen, acc, &e.to_string())?;
-                self.unsubscribe(rec.address.as_deref()).await?;
+                self.unsubscribe_many(&Self::unique_addrs(&self.round_active_targets(rec)))
+                    .await?;
                 return Ok((r, None));
             }
         };
         if next.get("id").and_then(|i| i.as_str()) != Some(rec.id.as_str()) {
             let r = self.mark_stale(rec, &chosen, acc, "PLUGIN_CHANGED_ROUND_ID")?;
-            self.unsubscribe(rec.address.as_deref()).await?;
+            self.unsubscribe_many(&Self::unique_addrs(&self.round_active_targets(rec)))
+                .await?;
             return Ok((r, None));
         }
         // Consumers must still see which block actually included the transaction when known.
@@ -1653,9 +1794,20 @@ impl Engine {
             .and_then(|c| c.virtual_daa.parse::<u64>().ok())
             .unwrap_or(0);
         let is_historical = skip_live_probe || cur_daa as i128 > acc.daa + 100;
-        if next_address.is_some() && !is_historical {
-            self.subscribe(next_address.as_deref()).await?; // subscribe first: no notification gap
+        let prev_addrs = rec
+            .filter(|r| r.status == "LIVE")
+            .map(|r| Self::unique_addrs(&self.round_active_targets(r)))
+            .unwrap_or_default();
+        let next_targets =
+            self.data_active_targets(Some(contract), &next, next_address.as_deref());
+        let next_addrs = Self::unique_addrs(&next_targets);
+        let (to_sub, to_unsub) = Self::diff_subscription_addrs(&prev_addrs, &next_addrs);
+        let mut subscribed_in_commit = false;
+        if !to_sub.is_empty() && !is_historical {
+            self.subscribe_many(&to_sub).await?; // subscribe first: no notification gap
+            subscribed_in_commit = true;
         }
+        let mut any_spent_remaining = false;
         let utxo_check;
         if skip_live_probe {
             utxo_check = if has_tip {
@@ -1663,13 +1815,47 @@ impl Engine {
             } else {
                 "TERMINAL_BATCH_HISTORICAL"
             };
+        } else if contract.starts_with("kusdt-v2@") {
+            if next_targets.is_empty() {
+                if let Some(r) = rec {
+                    let old_targets = self.round_active_targets(r);
+                    let old_addrs = Self::unique_addrs(&old_targets);
+                    let present = self.query_present_outpoints(&old_addrs).await?;
+                    if old_targets
+                        .iter()
+                        .any(|t| present.contains(&outpoint_key(&t.outpoint)))
+                    {
+                        bail!("TERMINAL_BUT_TIP_STILL_LIVE");
+                    }
+                }
+                utxo_check = "TERMINAL_OLD_TIP_GONE";
+            } else {
+                let present = self.query_present_outpoints(&next_addrs).await?;
+                let all_live = next_targets
+                    .iter()
+                    .all(|t| present.contains(&outpoint_key(&t.outpoint)));
+                let any_live = next_targets
+                    .iter()
+                    .any(|t| present.contains(&outpoint_key(&t.outpoint)));
+                any_spent_remaining = !all_live;
+                if is_historical && any_live && !to_sub.is_empty() {
+                    self.subscribe_many(&to_sub).await?;
+                    subscribed_in_commit = true;
+                }
+                utxo_check = if all_live {
+                    "SUCCESSOR_LIVE_MATCHES"
+                } else {
+                    "SUCCESSOR_NOT_LIVE_(ALREADY_SPENT_OR_INDEX_LAG)"
+                };
+            }
         } else if has_tip {
             if let Some(u) = self
                 .live_utxo(next_address.as_deref(), &next["tip"])
                 .await?
             {
-                if is_historical && next_address.is_some() {
-                    self.subscribe(next_address.as_deref()).await?;
+                if is_historical && !to_sub.is_empty() {
+                    self.subscribe_many(&to_sub).await?;
+                    subscribed_in_commit = true;
                 }
                 // GHOSTDAG: containing DAA <= accepting DAA (parallel blocks are merged later); never strict equality.
                 let daa_ok = u.block_daa_score <= acc.daa && acc.daa - u.block_daa_score <= 2000;
@@ -1683,8 +1869,8 @@ impl Engine {
                     && cid_ok
                     && daa_ok;
                 if !ok {
-                    if !is_historical {
-                        self.unsubscribe(next_address.as_deref()).await?;
+                    if subscribed_in_commit {
+                        self.unsubscribe_many(&to_sub).await?;
                     }
                     bail!("SUCCESSOR_UTXO_MISMATCH");
                 }
@@ -1805,8 +1991,8 @@ impl Engine {
         })?;
         let seq = match outcome {
             Err(existing) => {
-                if next_address.is_some() {
-                    self.unsubscribe(next_address.as_deref()).await?; // balance the subscribe above
+                if subscribed_in_commit {
+                    self.unsubscribe_many(&to_sub).await?; // balance the subscribe above
                 }
                 self.store.log_at(
                     "DUPLICATE_SKIPPED",
@@ -1817,11 +2003,8 @@ impl Engine {
             }
             Ok(seq) => seq,
         };
-        if let Some(r) = rec
-            && r.address.is_some()
-            && r.status == "LIVE"
-        {
-            self.unsubscribe(r.address.as_deref()).await?;
+        if !to_unsub.is_empty() {
+            self.unsubscribe_many(&to_unsub).await?;
         }
         let mut d = Map::new();
         d.insert("round".into(), json!(next_id));
@@ -1839,8 +2022,8 @@ impl Engine {
             d.insert(k.into(), v);
         }
         self.store.log_at("APPLIED", Value::Object(d), now);
-        if has_tip
-            && utxo_check != "SUCCESSOR_LIVE_MATCHES"
+        if !next_targets.is_empty()
+            && (utxo_check != "SUCCESSOR_LIVE_MATCHES" || any_spent_remaining)
             && self.config.auto_catchup
             && !chosen.source.starts_with("vc-batch")
         {
@@ -2490,14 +2673,25 @@ impl Engine {
                 now,
             )
         })?;
-        if let Some(c) = &current
-            && c.status == "LIVE"
-            && c.address.is_some()
-        {
-            self.unsubscribe(c.address.as_deref()).await?;
+        let cur_addrs = current
+            .as_ref()
+            .filter(|c| c.status == "LIVE")
+            .map(|c| Self::unique_addrs(&self.round_active_targets(c)))
+            .unwrap_or_default();
+        let prev_targets = if truthy(Some(prev)) {
+            self.data_active_targets(Some(&contract), prev, prev_address.as_deref())
+        } else {
+            Vec::new()
+        };
+        let prev_addrs = Self::unique_addrs(&prev_targets);
+        let (to_sub, to_unsub) = Self::diff_subscription_addrs(&cur_addrs, &prev_addrs);
+        if !to_unsub.is_empty() {
+            self.unsubscribe_many(&to_unsub).await?;
         }
-        if prev_address.is_some() {
-            self.subscribe(prev_address.as_deref()).await?;
+        if !to_sub.is_empty() {
+            self.subscribe_many(&to_sub).await?;
+        }
+        if !prev_targets.is_empty() {
             self.run_spend(&t.round_id, None);
         } else {
             self.run_genesis_after_rollback(&t.round_id, t.observed_at);
@@ -2556,48 +2750,49 @@ impl Engine {
         Ok(w.1.clone())
     }
 
-    /// Missed-notification safety net: one batched UTXO query for every active (LIVE/STALE with a tip) round.
+    /// Missed-notification safety net: batched UTXO query (<= 64 per call) for every active round & its mutable targets.
     pub async fn reconcile(self: &Arc<Self>) -> Result<()> {
         let active = self.store.db().rounds(false, true)?;
         if active.is_empty() {
             return Ok(());
         }
         let mut addrs: Vec<String> = vec![];
-        for a in active
-            .iter()
-            .filter_map(|x| x.address.clone())
-            .filter(|a| !a.is_empty())
-        {
-            if !addrs.contains(&a) {
-                addrs.push(a);
+        for x in &active {
+            for t in self.round_active_targets(x) {
+                if !t.address.is_empty() && !addrs.contains(&t.address) {
+                    addrs.push(t.address);
+                }
             }
         }
         if addrs.is_empty() {
             return Ok(());
         }
         let observed = now_ms();
-        let r = self
-            .q("getUtxosByAddresses", json!({ "addresses": addrs }))
-            .await?;
-        let present: HashSet<String> = arr(r.get("entries"))
-            .iter()
-            .map(normalize_utxo)
-            .collect::<Result<Vec<_>>>()?
-            .iter()
-            .map(|u| outpoint_key(&u.outpoint))
-            .collect();
+        let present = self.query_present_outpoints(&addrs).await?;
         let now = now_ms();
         let mut spent_rounds = vec![];
         for x in active {
-            if present.contains(&outpoint_key(&x.data["tip"])) {
+            let targets = self.round_active_targets(&x);
+            if targets.is_empty() {
+                continue;
+            }
+            let missing: Vec<_> = targets
+                .iter()
+                .filter(|t| !present.contains(&outpoint_key(&t.outpoint)))
+                .collect();
+            if missing.is_empty() {
                 self.store.db().mark_live_seen(&x.id, now)?;
-                self.mark_live_anchor(&x.id, &x.data["tip"], observed)?;
+                for t in &targets {
+                    self.mark_live_anchor(&x.id, &t.outpoint, observed)?;
+                }
             } else {
-                // Tip spent on chain. A STALE round (earlier transient error) is un-staled so it can self-heal.
+                // At least one active outpoint spent on chain. Un-stale STALE round so it can self-heal.
                 if x.status == "STALE" {
                     self.store.db().set_round_status(&x.id, "LIVE", now)?;
                 }
-                self.store.db().mark_tip_spent(&x.id, &x.data["tip"], now)?;
+                for m in missing {
+                    self.store.db().mark_tip_spent(&x.id, &m.outpoint, now)?;
+                }
                 spent_rounds.push(x);
             }
         }
@@ -2624,7 +2819,10 @@ impl Engine {
             for x in spent_rounds {
                 if let Ok(Some(cur)) = self.store.db().round(&x.id)
                     && cur.status == "LIVE"
-                    && !present.contains(&outpoint_key(&cur.data["tip"]))
+                    && self
+                        .round_active_targets(&cur)
+                        .iter()
+                        .any(|t| !present.contains(&outpoint_key(&t.outpoint)))
                 {
                     self.run_spend(&cur.id, None);
                 }
@@ -2634,7 +2832,7 @@ impl Engine {
         Ok(())
     }
 
-    /// Single-pass sequential chain scanner: walks V2 High chain blocks once and advances all matching active tips.
+    /// Single-pass sequential chain scanner: walks V2 High chain blocks once and advances all matching active targets.
     async fn batch_catchup(self: &Arc<Self>, rounds: &[RoundRow]) -> Result<(usize, usize)> {
         let mut active_tips: HashMap<String, RoundRow> = HashMap::new();
         let mut earliest: Option<(i128, String)> = None;
@@ -2643,11 +2841,16 @@ impl Engine {
             let Some(cur) = self.store.db().round(&r.id)? else {
                 continue;
             };
-            if cur.status != "LIVE" || !truthy(cur.data.get("tip")) {
+            if cur.status != "LIVE" {
                 continue;
             }
-            let tip_key = outpoint_key(&cur.data["tip"]);
-            active_tips.insert(tip_key, cur.clone());
+            let targets = self.round_active_targets(&cur);
+            if targets.is_empty() {
+                continue;
+            }
+            for t in targets {
+                active_tips.insert(outpoint_key(&t.outpoint), cur.clone());
+            }
             let accepting = js_string(cur.data.get("accepting"));
             if !accepting.is_empty() {
                 let h = if let Some(cached) = acc_cache.get(&accepting) {
@@ -2825,11 +3028,13 @@ impl Engine {
                         && res == "APPLIED"
                     {
                         applied_count += 1;
+                        active_tips.retain(|_, v| v.id != rec.id);
                         if let Some(updated) = updated_opt
                             && updated.status == "LIVE"
-                            && truthy(updated.data.get("tip"))
                         {
-                            active_tips.insert(outpoint_key(&updated.data["tip"]), updated);
+                            for t in self.round_active_targets(&updated) {
+                                active_tips.insert(outpoint_key(&t.outpoint), updated.clone());
+                            }
                         }
                     }
                 }
@@ -2876,12 +3081,19 @@ impl Engine {
             from_blue = top;
         }
         // Ensure any round left active after skipping historical subscriptions is subscribed for live events.
-        let sub_addrs: Vec<String> = active_tips
-            .values()
-            .filter_map(|r| r.address.clone())
-            .collect();
+        let mut seen_rounds: HashSet<String> = HashSet::new();
+        let mut sub_addrs: Vec<String> = Vec::new();
+        for r in active_tips.values() {
+            if seen_rounds.insert(r.id.clone()) {
+                for a in Self::unique_addrs(&self.round_active_targets(r)) {
+                    if !sub_addrs.contains(&a) {
+                        sub_addrs.push(a);
+                    }
+                }
+            }
+        }
         let _ = self.subscribe_many(&sub_addrs).await;
-        let remaining = active_tips.len();
+        let remaining = seen_rounds.len();
         self.store.log(
             "BATCH_CATCHUP_DONE",
             json!({

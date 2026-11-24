@@ -167,9 +167,12 @@ async fn dispatch(api: &Arc<Api>, req: Request) -> Result<Response> {
             }
             [n, rest @ ..]
                 if *n != "v1"
-                    && rest
-                        .first()
-                        .is_some_and(|r| matches!(*r, "info" | "rounds" | "txid" | "networks")) =>
+                    && rest.first().is_some_and(|r| {
+                        matches!(
+                            *r,
+                            "info" | "rounds" | "txid" | "networks" | "wallets" | "covenants"
+                        )
+                    }) =>
             {
                 key = Some(n);
                 route = format!("/v1/{}", rest.join("/"));
@@ -259,6 +262,15 @@ async fn dispatch(api: &Arc<Api>, req: Request) -> Result<Response> {
     }
     if let Some(sub_v1) = route.strip_prefix("/v1/") {
         let rest_ref: Vec<&str> = sub_v1.split('/').filter(|s| !s.is_empty()).collect();
+        match rest_ref.as_slice() {
+            ["wallets", pk, "activity"] => {
+                return kusdt_v2_wallet_activity(&view, pk, &query, virtual_daa);
+            }
+            ["covenants", cid] => {
+                return kusdt_v2_covenant_lookup(&view, cid);
+            }
+            _ => {}
+        }
         if matches!(
             rest_ref.first().copied(),
             Some("info" | "rounds" | "txid")
@@ -283,6 +295,13 @@ pub fn category(r: &RoundRow) -> &'static str {
         .is_some_and(|s| s.starts_with("rolling-v1@"))
     {
         return rolling_category(r);
+    }
+    if r
+        .contract
+        .as_deref()
+        .is_some_and(|s| s.starts_with("kusdt-v2@"))
+    {
+        return kusdt_v2_category(r);
     }
     if r.status == "STALE"
         || !r
@@ -315,6 +334,20 @@ fn rolling_category(r: &RoundRow) -> &'static str {
         Some("sales") => "open",
         Some("sealed" | "win" | "frozen") => "sealed",
         Some("refund") => "close",
+        _ => "unknown",
+    }
+}
+fn kusdt_v2_category(r: &RoundRow) -> &'static str {
+    if r.status == "STALE" || r.status == "ROLLED_BACK" {
+        return "unknown";
+    }
+    if r.status == "TERMINAL" || !r.data["terminal"].is_null() {
+        return "close";
+    }
+    match r.data["stage"].as_str() {
+        Some("M_OPEN") => "open",
+        Some("M_SEALED") => "sealed",
+        Some("M_DISPATCH" | "SHARD_ONLY" | "DONE") => "close",
         _ => "unknown",
     }
 }
@@ -779,12 +812,31 @@ fn rolling_api(
             && r.status != "STALE"
             && r.status != "ROLLED_BACK"
     };
+    let is_kusdt_v2 = |r: &RoundRow| {
+        r.contract
+            .as_deref()
+            .is_some_and(|s| s.starts_with("kusdt-v2@"))
+            && r.status != "STALE"
+            && r.status != "ROLLED_BACK"
+    };
+    let proto_filter = first(query, "protocol");
+    let pid_filter = first(query, "profileId");
     match rest_ref {
         ["info"] => {
             let rounds: Vec<_> = db
                 .rounds(false, false)?
                 .into_iter()
-                .filter(is_rolling)
+                .filter(|r| {
+                    let match_proto = match proto_filter {
+                        Some("kusdt-v2") => is_kusdt_v2(r),
+                        Some("rolling-v1") => is_rolling(r),
+                        _ => is_rolling(r) || is_kusdt_v2(r),
+                    };
+                    let match_pid = pid_filter
+                        .map(|p| r.data.get("profileId").and_then(|v| v.as_str()) == Some(p))
+                        .unwrap_or(true);
+                    match_proto && match_pid
+                })
                 .collect();
             let revision = rounds.iter().map(|r| r.updated_at).max().unwrap_or(0);
             let cursor = cp
@@ -823,18 +875,36 @@ fn rolling_api(
             let mut rounds: Vec<_> = db
                 .rounds(false, false)?
                 .into_iter()
-                .filter(is_rolling)
+                .filter(|r| {
+                    let match_proto = match proto_filter {
+                        Some("kusdt-v2") => is_kusdt_v2(r),
+                        Some("rolling-v1") => is_rolling(r),
+                        _ => is_rolling(r) || is_kusdt_v2(r),
+                    };
+                    let match_pid = pid_filter
+                        .map(|p| r.data.get("profileId").and_then(|v| v.as_str()) == Some(p))
+                        .unwrap_or(true);
+                    match_proto && match_pid
+                })
                 .collect();
             rounds.sort_by(|a, b| {
-                a.data["cid"]
-                    .as_str()
-                    .unwrap_or("")
-                    .cmp(b.data["cid"].as_str().unwrap_or(""))
+                let a_term = !a.data["terminal"].is_null();
+                let b_term = !b.data["terminal"].is_null();
+                a_term
+                    .cmp(&b_term)
+                    .then_with(|| b.updated_at.cmp(&a.updated_at))
+                    .then_with(|| {
+                        a.data["cid"]
+                            .as_str()
+                            .unwrap_or("")
+                            .cmp(b.data["cid"].as_str().unwrap_or(""))
+                    })
             });
             let start = if let Some(c) = cursor {
                 rounds
                     .iter()
-                    .position(|r| r.data["cid"].as_str().unwrap_or("") > c)
+                    .position(|r| r.data["cid"].as_str() == Some(c))
+                    .map(|i| i + 1)
                     .unwrap_or(rounds.len())
             } else {
                 0
@@ -852,6 +922,30 @@ fn rolling_api(
                 .iter()
                 .map(|r| {
                     let d = &r.data;
+                    if is_kusdt_v2(r) {
+                        let summary =
+                            crate::contracts::kusdt_v2::build_summary_fields(d, virtual_daa);
+                        let accepting_daa = d
+                            .get("acceptingDaa")
+                            .filter(|v| !v.is_null())
+                            .cloned()
+                            .unwrap_or_else(|| d["utxoDaa"].clone());
+                        let mut item = json!({
+                            "cid": d["cid"],
+                            "terminal": d["terminal"],
+                            "stage": d["stage"],
+                            "managerValue": d["value"],
+                            "acceptingDaa": accepting_daa,
+                            "updatedAt": r.updated_at,
+                        });
+                        if let (Some(dst), Some(src)) = (item.as_object_mut(), summary.as_object())
+                        {
+                            for (k, v) in src {
+                                dst.insert(k.clone(), v.clone());
+                            }
+                        }
+                        return item;
+                    }
                     let s = &d["state"];
                     let indices = s["indices"].as_array();
                     let shards = indices.map(|a| a.len()).unwrap_or(0);
@@ -896,10 +990,23 @@ fn rolling_api(
                 return Ok(response(400, json!({"detail":"INVALID_CID"})));
             }
             let rows = db.by_cid(cid)?;
-            let Some(r) = rows.into_iter().find(is_rolling) else {
+            let Some(r) = rows.into_iter().find(|r| is_rolling(r) || is_kusdt_v2(r)) else {
                 return Ok(response(404, json!({"detail":"NOT_FOUND"})));
             };
             let d = &r.data;
+            if is_kusdt_v2(&r) {
+                return Ok(response(
+                    200,
+                    build_kusdt_v2_round_response(
+                        &db,
+                        &r,
+                        cid,
+                        &view.net().network_id,
+                        &view.net().genesis,
+                        virtual_daa,
+                    )?,
+                ));
+            }
             let s = &d["state"];
             let settings = &d["settings"];
             let indices = s["indices"].as_array();
@@ -971,9 +1078,14 @@ fn rolling_api(
                 return Ok(response(400, json!({"detail":"INVALID_CID"})));
             }
             let rows = db.by_cid(cid)?;
-            let Some(r) = rows.into_iter().find(is_rolling) else {
+            let Some(r) = rows.into_iter().find(|r| is_rolling(r) || is_kusdt_v2(r)) else {
                 return Ok(response(404, json!({"detail":"NOT_FOUND"})));
             };
+            let effective_pid = r
+                .data
+                .get("profileId")
+                .and_then(|v| v.as_str())
+                .unwrap_or(profile_id);
             let limit = first(query, "limit")
                 .unwrap_or("50")
                 .parse::<usize>()
@@ -1013,7 +1125,7 @@ fn rolling_api(
                     "schema": 1,
                     "network": view.net().network_id,
                     "genesisHash": view.net().genesis,
-                    "profileId": profile_id,
+                    "profileId": effective_pid,
                     "cid": cid,
                     "revision": revision.to_string(),
                     "events": events,
@@ -1200,21 +1312,311 @@ fn rolling_api(
             let Some(r) = db.round(&tr.round_id)? else {
                 return Ok(response(404, json!({"detail":"NOT_FOUND"})));
             };
-            if !is_rolling(&r) {
+            if !is_rolling(&r) && !is_kusdt_v2(&r) {
                 return Ok(response(404, json!({"detail":"NOT_FOUND"})));
             }
+            let effective_pid = r
+                .data
+                .get("profileId")
+                .and_then(|v| v.as_str())
+                .unwrap_or(profile_id);
             Ok(response(
                 200,
                 json!({
                     "schema": 1,
                     "network": view.net().network_id,
                     "genesisHash": view.net().genesis,
-                    "profileId": profile_id,
+                    "profileId": effective_pid,
                     "cid": r.data["cid"],
                     "txid": txid,
                 }),
             ))
         }
         _ => Ok(response(404, json!({"detail":"NOT_FOUND"}))),
+    }
+}
+
+/// Wallet activity aggregation across kUSDT v2 rounds (`buyer`, `creator`, `firstBuyerDeposit`).
+fn kusdt_v2_wallet_activity(
+    view: &View,
+    pk: &str,
+    query: &[(String, String)],
+    virtual_daa: Option<&str>,
+) -> Result<Response> {
+    if !is_hash(pk) {
+        return Ok(response(400, json!({"detail":"INVALID_PK"})));
+    }
+    let pid_filter = first(query, "profileId");
+    let db = view.engine.store.db();
+    let rounds: Vec<_> = db
+        .rounds(false, false)?
+        .into_iter()
+        .filter(|r| {
+            r.contract
+                .as_deref()
+                .is_some_and(|s| s.starts_with("kusdt-v2@"))
+                && r.status != "STALE"
+                && r.status != "ROLLED_BACK"
+                && pid_filter
+                    .map(|p| r.data.get("profileId").and_then(|v| v.as_str()) == Some(p))
+                    .unwrap_or(true)
+        })
+        .collect();
+
+    let mut activities = Vec::new();
+    let mut by_profile: serde_json::Map<String, Value> = serde_json::Map::new();
+    for r in rounds {
+        let roles = crate::contracts::kusdt_v2::wallet_roles_in_round(&r.data, pk);
+        if roles.is_empty() {
+            continue;
+        }
+        let summary = crate::contracts::kusdt_v2::build_summary_fields(&r.data, virtual_daa);
+        let pid = summary
+            .get("profileId")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let entry = json!({
+            "cid": r.data["cid"],
+            "profileId": pid,
+            "roles": roles,
+            "phase": summary["phase"],
+            "subPhase": summary["subPhase"],
+            "terminal": summary["terminal"],
+            "asset": summary["asset"],
+            "settlementProgress": summary["settlementProgress"],
+            "protocolData": summary["protocolData"],
+            "updatedAt": r.updated_at,
+        });
+        by_profile
+            .entry(pid)
+            .or_insert_with(|| json!([]))
+            .as_array_mut()
+            .unwrap()
+            .push(entry.clone());
+        activities.push(entry);
+    }
+
+    Ok(response(
+        200,
+        json!({
+            "schema": 1,
+            "network": view.net().network_id,
+            "genesisHash": view.net().genesis,
+            "pk": pk,
+            "activities": activities,
+            "byProfile": by_profile,
+        }),
+    ))
+}
+
+/// Live UTXO + redeemHex lookup by `covenantId` (manager `cid` or shard `shardCid`).
+fn kusdt_v2_covenant_lookup(view: &View, cid: &str) -> Result<Response> {
+    if !is_hash(cid) {
+        return Ok(response(400, json!({"detail":"INVALID_CID"})));
+    }
+    let db = view.engine.store.db();
+    let prefix = view.net().address_prefix;
+    let is_kv2 = |r: &RoundRow| {
+        r.contract
+            .as_deref()
+            .is_some_and(|s| s.starts_with("kusdt-v2@"))
+            && r.status != "STALE"
+            && r.status != "ROLLED_BACK"
+    };
+    for r in db.by_cid(cid)? {
+        if is_kv2(&r)
+            && let Some(found) = crate::contracts::kusdt_v2::find_live_covenant(&r.data, cid, prefix)
+        {
+            return Ok(response(
+                200,
+                json!({
+                    "schema": 1,
+                    "network": view.net().network_id,
+                    "genesisHash": view.net().genesis,
+                    "covenant": found,
+                }),
+            ));
+        }
+    }
+    for r in db.rounds(true, false)? {
+        if is_kv2(&r)
+            && let Some(found) = crate::contracts::kusdt_v2::find_live_covenant(&r.data, cid, prefix)
+        {
+            return Ok(response(
+                200,
+                json!({
+                    "schema": 1,
+                    "network": view.net().network_id,
+                    "genesisHash": view.net().genesis,
+                    "covenant": found,
+                }),
+            ));
+        }
+    }
+    Ok(response(404, json!({"detail":"NOT_FOUND"})))
+}
+
+fn build_kusdt_v2_round_response(
+    db: &crate::store::Db,
+    r: &RoundRow,
+    cid: &str,
+    network_id: &str,
+    genesis: &str,
+    virtual_daa: Option<&str>,
+) -> Result<Value> {
+    let d = &r.data;
+    let revision = db.transition_count(&r.id)?;
+    let raw_receipts = db.round_receipts(&r.id)?;
+    let need_enrich = raw_receipts.is_empty()
+        || raw_receipts
+            .iter()
+            .any(crate::contracts::kusdt_v2::receipt_needs_enrichment);
+    let receipts = if need_enrich {
+        let trs = db.transitions(&r.id)?;
+        crate::contracts::kusdt_v2::enrich_kusdt_v2_receipts(d, raw_receipts, &trs)
+    } else {
+        raw_receipts
+    };
+    let head_accepting_daa = d
+        .get("acceptingDaa")
+        .filter(|v| !v.is_null())
+        .cloned()
+        .or_else(|| {
+            receipts
+                .last()
+                .and_then(|rec| rec.get("acceptingDaa"))
+                .filter(|v| !v.is_null())
+                .cloned()
+        })
+        .unwrap_or_else(|| d.get("utxoDaa").cloned().unwrap_or(Value::Null));
+    let summary = crate::contracts::kusdt_v2::build_summary_fields(d, virtual_daa);
+    let mut out = json!({
+        "schema": 1,
+        "network": network_id,
+        "genesisHash": genesis,
+        "status": "UNVALIDATED",
+        "cid": cid,
+        "origin": d.get("origin").cloned().unwrap_or(Value::Null),
+        "revision": revision.to_string(),
+        "terminal": d.get("terminal").cloned().unwrap_or(Value::Null),
+        "manager": d.get("manager").cloned().unwrap_or(Value::Null),
+        "shards": d.get("shards").cloned().unwrap_or_else(|| json!({})),
+        "draw": d.get("draw").cloned().unwrap_or(Value::Null),
+        "receipts": receipts,
+        "summary": summary,
+        "head": {
+            "txid": d.get("latestTxid").cloned().unwrap_or(Value::Null),
+            "acceptingBlock": d.get("accepting").cloned().unwrap_or(Value::Null),
+            "acceptingDaa": head_accepting_daa,
+            "observedVirtualDaa": virtual_daa,
+        },
+    });
+    if let (Some(dst), Some(src)) = (out.as_object_mut(), summary.as_object()) {
+        for (k, v) in src {
+            dst.insert(k.clone(), v.clone());
+        }
+    }
+    Ok(out)
+}
+
+#[cfg(test)]
+mod kusdt_v2_api_tests {
+    use super::*;
+    use crate::store::Store;
+
+    #[test]
+    fn round_response_exposes_draw_and_receipts() {
+        let store = Store::open(":memory:", None, "mainnet").unwrap();
+        let db = store.db();
+        let cid = "90".repeat(32);
+        let draw_txid = "dd".repeat(32);
+        let winner_pk = "33".repeat(32);
+        let row = RoundRow {
+            id: "aa".repeat(32),
+            contract: Some("kusdt-v2@1.0.0".into()),
+            status: "LIVE".into(),
+            address: None,
+            data: json!({
+                "cid": cid,
+                "terminal": null,
+                "winnerPk": winner_pk,
+                "draw": {
+                    "txid": draw_txid,
+                    "shard": 0,
+                    "record": 1,
+                    "ticket": 2,
+                    "winnerPk": winner_pk,
+                },
+                "shards": {},
+                "settings": {
+                    "kusdtCid": "8f".repeat(32),
+                    "creatorPk": "11".repeat(32),
+                    "ticketPrice": "1000000",
+                    "closeDaa": "900",
+                },
+            }),
+            updated_at: 1,
+            live_seen_at: Some(1),
+        };
+        let out = build_kusdt_v2_round_response(
+            &db,
+            &row,
+            &cid,
+            "mainnet",
+            "58c2d4199e21f910d1571d114969cecef48f09f934d42ccb6a281a15868f2999",
+            Some("1000"),
+        )
+        .unwrap();
+        assert_eq!(out["draw"]["txid"], draw_txid);
+        assert_eq!(out["draw"]["shard"], 0);
+        assert_eq!(out["draw"]["record"], 1);
+        assert_eq!(out["draw"]["ticket"], 2);
+        assert_eq!(out["draw"]["winnerPk"], winner_pk);
+        assert!(out["receipts"].is_array());
+
+        // Historical fallback: utxoDaa stale, no acceptingDaa -> falls back to latest receipt acceptingDaa.
+        drop(db);
+        let id_hist = "ab".repeat(32);
+        store
+            .tx(|wdb| {
+                wdb.add_round_receipt(
+                    &id_hist,
+                    1,
+                    &json!({"txid": "01".repeat(32), "action": "DISPATCH_BATCH", "acceptingDaa": "600632354"}),
+                )?;
+                wdb.add_round_receipt(
+                    &id_hist,
+                    2,
+                    &json!({"txid": "02".repeat(32), "action": "PAYOUT_SELF", "acceptingDaa": "600633213"}),
+                )
+            })
+            .unwrap();
+        let db = store.db();
+        let hist_row = RoundRow {
+            id: id_hist,
+            contract: Some("kusdt-v2@1.0.0".into()),
+            status: "PAID".into(),
+            address: None,
+            data: json!({
+                "cid": cid,
+                "terminal": "PAID",
+                "utxoDaa": "600632354",
+                "latestTxid": "02".repeat(32),
+                "shards": {},
+            }),
+            updated_at: 2,
+            live_seen_at: None,
+        };
+        let out_hist = build_kusdt_v2_round_response(
+            &db,
+            &hist_row,
+            &cid,
+            "mainnet",
+            "58c2d4199e21f910d1571d114969cecef48f09f934d42ccb6a281a15868f2999",
+            Some("600633250"),
+        )
+        .unwrap();
+        assert_eq!(out_hist["head"]["acceptingDaa"], "600633213");
     }
 }

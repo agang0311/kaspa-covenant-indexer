@@ -1,6 +1,7 @@
 //! Contract plugins: the engine tracks a covenant UTXO lineage generically; a plugin owns the rules of ONE pinned
 //! contract version. This build ships native Kaswin V2.0.2 and TN10 Rolling v1 plugins. Old rounds keep the plugin key
 //! that created them; a round whose plugin is not loaded is never re-interpreted with another one.
+pub mod kusdt_v2;
 pub mod registry;
 pub mod rolling_v1;
 pub mod v202;
@@ -17,6 +18,7 @@ pub use v202::BlockRef;
 pub enum ContractRules {
     V202(v202::V202),
     RollingV1(rolling_v1::RollingV1),
+    KusdtV2(kusdt_v2::KusdtV2),
 }
 
 impl ContractRules {
@@ -24,54 +26,63 @@ impl ContractRules {
         match self {
             ContractRules::V202(r) => r.network,
             ContractRules::RollingV1(r) => r.network,
+            ContractRules::KusdtV2(r) => r.network,
         }
     }
     pub fn config(&self) -> &Value {
         match self {
             ContractRules::V202(r) => &r.config,
             ContractRules::RollingV1(r) => &r.config,
+            ContractRules::KusdtV2(r) => &r.config,
         }
     }
     pub fn profile_id(&self) -> &str {
         match self {
             ContractRules::V202(r) => r.profile_id(),
             ContractRules::RollingV1(r) => r.profile_id(),
+            ContractRules::KusdtV2(r) => r.profile_id(),
         }
     }
     pub fn watch_addresses(&self) -> Vec<String> {
         match self {
             ContractRules::V202(r) => r.watch_addresses(),
             ContractRules::RollingV1(r) => r.watch_addresses(),
+            ContractRules::KusdtV2(r) => r.watch_addresses(),
         }
     }
     pub fn discover(&self, u: &Utxo) -> Option<String> {
         match self {
             ContractRules::V202(r) => r.discover(u),
             ContractRules::RollingV1(r) => r.discover(u),
+            ContractRules::KusdtV2(r) => r.discover(u),
         }
     }
     pub fn candidate_genesis(&self, tx: &Value) -> bool {
         match self {
             ContractRules::V202(r) => r.candidate_genesis(tx),
             ContractRules::RollingV1(r) => r.candidate_genesis(tx),
+            ContractRules::KusdtV2(r) => r.candidate_genesis(tx),
         }
     }
     pub fn inspect_genesis(&self, tx: &Value) -> (bool, String) {
         match self {
             ContractRules::V202(r) => r.inspect_genesis(tx),
             ContractRules::RollingV1(r) => r.inspect_genesis(tx),
+            ContractRules::KusdtV2(r) => r.inspect_genesis(tx),
         }
     }
     pub fn genesis(&self, tx: &Value, b: &BlockRef) -> Result<Option<Value>> {
         match self {
             ContractRules::V202(r) => r.genesis(tx, b),
             ContractRules::RollingV1(r) => r.genesis(tx, b),
+            ContractRules::KusdtV2(r) => r.genesis(tx, b),
         }
     }
     pub fn advance(&self, round: &Value, tx: &Value, b: &BlockRef) -> Result<Value> {
         match self {
             ContractRules::V202(r) => r.advance(round, tx, b),
             ContractRules::RollingV1(r) => r.advance(round, tx, b),
+            ContractRules::KusdtV2(r) => r.advance(round, tx, b),
         }
     }
     pub fn advance_with_accessor(
@@ -84,12 +95,14 @@ impl ContractRules {
         match self {
             ContractRules::V202(r) => r.advance(round, tx, b),
             ContractRules::RollingV1(r) => r.advance_with_accessor(round, tx, b, accessor),
+            ContractRules::KusdtV2(r) => r.advance_with_accessor(round, tx, b, accessor),
         }
     }
     pub fn kind_of(&self, tx: &Value) -> String {
         match self {
             ContractRules::V202(_) => v202::action_of(tx),
             ContractRules::RollingV1(_) => rolling_v1::action_of(tx),
+            ContractRules::KusdtV2(_) => kusdt_v2::action_of(tx),
         }
     }
 }
@@ -141,9 +154,12 @@ impl Plugin {
     pub fn is_rolling(&self) -> bool {
         matches!(self.rules, ContractRules::RollingV1(_))
     }
+    pub fn is_kusdt_v2(&self) -> bool {
+        matches!(self.rules, ContractRules::KusdtV2(_))
+    }
     /// Option keys this plugin actually reads; the admin page only offers these for editing.
     pub fn configurable(&self) -> Vec<&'static str> {
-        if self.is_rolling() {
+        if self.is_rolling() || self.is_kusdt_v2() {
             vec!["registryAddresses"]
         } else {
             vec!["registryAddresses", "registrationSompi", "requiredDeposit", "allowedCreators", "initialStateGuards"]
@@ -308,6 +324,14 @@ pub fn is_native_rolling_v1(module: &str) -> bool {
     )
 }
 
+/// Module names that select the native kUSDT v2 (256 parallel shards) plugin.
+pub fn is_native_kusdt_v2(module: &str) -> bool {
+    matches!(
+        module.trim_start_matches("./"),
+        "kusdt-v2" | "kusdt-v2.mjs" | "native:kusdt-v2"
+    )
+}
+
 pub fn load_contracts_json(text: &str, ctx: &LoadCtx) -> Result<ContractRegistry> {
     let cfg: Value = serde_json::from_str(text)?;
     let list = cfg
@@ -358,6 +382,19 @@ pub fn load_contracts_json(text: &str, ctx: &LoadCtx) -> Result<ContractRegistry
                 module: module.to_string(),
                 pinned: c.get("sha256").map(|s| truthy(Some(s))).unwrap_or(false),
                 rules: ContractRules::RollingV1(rules),
+            });
+        } else if is_native_kusdt_v2(module) {
+            let rules = kusdt_v2::KusdtV2::create(&options, Some(ctx.network))
+                .map_err(|e| anyhow!("{e}"))?;
+            let version = kusdt_v2::VERSION.to_string();
+            plugins.push(Plugin {
+                id: crate::core::kusdt_v2::PROTOCOL_ID.into(),
+                key: format!("{}@{}", crate::core::kusdt_v2::PROTOCOL_ID, version),
+                version,
+                retired: c.get("retired") == Some(&json!(true)),
+                module: module.to_string(),
+                pinned: c.get("sha256").map(|s| truthy(Some(s))).unwrap_or(false),
+                rules: ContractRules::KusdtV2(rules),
             });
         } else {
             bail!(

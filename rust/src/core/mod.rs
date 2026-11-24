@@ -6,6 +6,7 @@ pub mod bytes;
 pub mod covenant;
 pub mod genesis;
 pub mod hashes;
+pub mod kusdt_v2;
 pub mod protocol;
 pub mod rolling;
 pub mod state;
