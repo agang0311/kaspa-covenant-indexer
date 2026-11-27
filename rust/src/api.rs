@@ -849,6 +849,23 @@ fn rolling_api(
                     })
                 })
                 .unwrap_or(Value::Null);
+            let profiles: Vec<Value> = view
+                .engine
+                .contracts()
+                .describe()
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|c| !c.get("retired").and_then(|v| v.as_bool()).unwrap_or(false))
+                .filter_map(|c| {
+                    let protocol_id = c.get("module").and_then(|v| v.as_str())?;
+                    let pid = c.get("profileId").and_then(|v| v.as_str())?;
+                    Some(json!({
+                        "protocolId": protocol_id,
+                        "profileId": pid,
+                    }))
+                })
+                .collect();
             Ok(response(
                 200,
                 json!({
@@ -856,6 +873,7 @@ fn rolling_api(
                     "network": view.net().network_id,
                     "genesisHash": view.net().genesis,
                     "profileId": profile_id,
+                    "profiles": profiles,
                     "status": "UNVALIDATED",
                     "readOnly": true,
                     "stale": false,
@@ -959,15 +977,29 @@ fn rolling_api(
                         .and_then(|x| x["end"].as_i64())
                         .unwrap_or(0);
                     let tickets = base_tickets + local_tickets;
+                    let round_profile_id = d
+                        .get("profileId")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(profile_id);
+                    let ticket_price = rolling_ticket_price(d);
+                    let (state_deposit, frozen_value, pool_value, frozen_count) =
+                        rolling_pool_breakdown(d);
                     json!({
                         "cid": d["cid"],
                         "terminal": d["terminal"],
                         "module": d["module"],
+                        "protocolId": "rolling-v1",
+                        "profileId": round_profile_id,
                         "tickets": tickets,
                         "shards": shards,
                         "bought": d["bought"],
                         "buys": d["buys"],
+                        "ticketPrice": ticket_price,
                         "managerValue": d["value"],
+                        "stateDeposit": state_deposit.to_string(),
+                        "frozenValue": frozen_value.to_string(),
+                        "poolValue": pool_value.to_string(),
+                        "frozenCount": frozen_count,
                         "acceptingDaa": d["utxoDaa"],
                         "updatedAt": r.updated_at,
                     })
@@ -1023,15 +1055,21 @@ fn rolling_api(
                 .unwrap_or(0);
             let tickets = base_tickets + local_tickets;
             let frozen = d.get("frozen").cloned().unwrap_or_else(|| json!([]));
-            let frozen_count = frozen.as_array().map(|a| a.len()).unwrap_or(0);
+            let (state_deposit, frozen_value, pool_value, frozen_count) =
+                rolling_pool_breakdown(d);
+            let ticket_price = rolling_ticket_price(d);
             let revision = db.transition_count(&r.id)?;
+            let round_profile_id = d
+                .get("profileId")
+                .and_then(|v| v.as_str())
+                .unwrap_or(profile_id);
             Ok(response(
                 200,
                 json!({
                     "schema": 1,
                     "network": view.net().network_id,
                     "genesisHash": view.net().genesis,
-                    "profileId": profile_id,
+                    "profileId": round_profile_id,
                     "status": "UNVALIDATED",
                     "cid": cid,
                     "origin": d.get("origin").cloned().unwrap_or(Value::Null),
@@ -1047,7 +1085,7 @@ fn rolling_api(
                     "frozen": frozen,
                     "summary": {
                         "module": d.get("module").cloned().unwrap_or(Value::Null),
-                        "ticketPrice": settings.get("ticketPrice").cloned().unwrap_or(Value::Null),
+                        "ticketPrice": ticket_price,
                         "ticketCap": settings.get("ticketCap").cloned().unwrap_or(Value::Null),
                         "minTickets": settings.get("minTickets").cloned().unwrap_or(Value::Null),
                         "closeEligibleDaa": settings.get("closeEligibleDaa").cloned().unwrap_or(Value::Null),
@@ -1055,6 +1093,9 @@ fn rolling_api(
                         "shards": shards,
                         "localRecords": local_records,
                         "frozenCount": frozen_count,
+                        "stateDeposit": state_deposit.to_string(),
+                        "frozenValue": frozen_value.to_string(),
+                        "poolValue": pool_value.to_string(),
                         "step": d.get("step").cloned().unwrap_or(Value::Null),
                         "buys": d.get("buys").cloned().unwrap_or(Value::Null),
                         "bought": d.get("bought").cloned().unwrap_or(Value::Null),
@@ -1619,4 +1660,82 @@ mod kusdt_v2_api_tests {
         .unwrap();
         assert_eq!(out_hist["head"]["acceptingDaa"], "600633213");
     }
+
+    #[test]
+    fn rolling_pool_breakdown_separates_deposit_and_includes_frozen_shards() {
+        let open_tail_only = json!({
+            "terminal": null,
+            "value": "9400000000",
+            "settings": {"ticketPrice": "100000000"},
+            "frozen": []
+        });
+        assert_eq!(rolling_ticket_price(&open_tail_only), json!("100000000"));
+        assert_eq!(
+            rolling_pool_breakdown(&open_tail_only),
+            (400_000_000, 0, 9_000_000_000, 0)
+        );
+
+        let open_with_frozen = json!({
+            "terminal": null,
+            "value": "9400000000",
+            "state": {"ticketPrice": "100000000"},
+            "frozen": [
+                {"value": "50000000000"},
+                {"value": "25000000000"}
+            ]
+        });
+        assert_eq!(rolling_ticket_price(&open_with_frozen), json!("100000000"));
+        assert_eq!(
+            rolling_pool_breakdown(&open_with_frozen),
+            (400_000_000, 75_000_000_000, 84_000_000_000, 2)
+        );
+
+        let closed = json!({
+            "terminal": "PAID",
+            "value": "0",
+            "settings": {"ticketPrice": "100000000"},
+            "frozen": []
+        });
+        assert_eq!(rolling_pool_breakdown(&closed), (0, 0, 0, 0));
+    }
+}
+
+fn parse_sompi_i128(v: Option<&Value>) -> i128 {
+    match v {
+        Some(Value::String(s)) => s.parse::<i128>().unwrap_or(0),
+        Some(Value::Number(n)) => n.as_i64().map(i128::from).unwrap_or(0),
+        _ => 0,
+    }
+}
+
+fn rolling_ticket_price(d: &Value) -> Value {
+    d.get("settings")
+        .and_then(|st| st.get("ticketPrice"))
+        .filter(|v| !v.is_null())
+        .or_else(|| {
+            d.get("state")
+                .and_then(|st| st.get("ticketPrice"))
+                .filter(|v| !v.is_null())
+        })
+        .cloned()
+        .unwrap_or(Value::Null)
+}
+
+/// Compute `(state_deposit, frozen_value, pool_value, frozen_count)` in sompi for a `rolling-v1` round.
+/// `pool_value` excludes the refundable manager state deposit (`DEPOSIT = 400_000_000`) and includes all unspent frozen shards.
+fn rolling_pool_breakdown(d: &Value) -> (i128, i128, i128, usize) {
+    let deposit = crate::core::rolling::DEPOSIT;
+    let terminal = d.get("terminal").is_some_and(|v| !v.is_null());
+    let manager_val = parse_sompi_i128(d.get("value"));
+    let (state_deposit, tail_pool) = if !terminal && manager_val >= deposit {
+        (deposit, manager_val - deposit)
+    } else {
+        (0, 0)
+    };
+    let frozen_arr = d.get("frozen").and_then(|v| v.as_array());
+    let frozen_count = frozen_arr.map(|a| a.len()).unwrap_or(0);
+    let frozen_value: i128 = frozen_arr
+        .map(|arr| arr.iter().map(|f| parse_sompi_i128(f.get("value"))).sum())
+        .unwrap_or(0);
+    (state_deposit, frozen_value, tail_pool + frozen_value, frozen_count)
 }
